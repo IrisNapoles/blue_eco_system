@@ -1,0 +1,57 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------
+   Blue Eco Inventory — design tokens
+   Palette: deep teal-green (brand: "Blue" meets "Eco"), warm neutral
+   background (not stark white — easier on the eyes for a data-dense
+   dashboard used for long shifts), muted gold for stock alerts, and a
+   brick/rust tone for waste/danger states (distinct from the alert
+   gold so the two read differently at a glance).
+   ------------------------------------------------------------------- */
+@theme {
+  --color-brand-50: #eaf5f2;
+  --color-brand-100: #cbe6de;
+  --color-brand-400: #1c8a71;
+  --color-brand-500: #0f6e5c;
+  --color-brand-600: #0b4f42;
+  --color-brand-700: #073a31;
+
+  --color-ink: #1c2b27;
+  --color-ink-soft: #55645f;
+
+  --color-canvas: #f7f5f0;
+  --color-surface: #ffffff;
+  --color-border: #e4e0d6;
+
+  --color-alert-50: #fbf3df;
+  --color-alert-500: #c9a227;
+  --color-alert-700: #8a6c14;
+
+  --color-danger-50: #f8e9e2;
+  --color-danger-500: #a6452e;
+  --color-danger-700: #7a3220;
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+.blob-shape {
+  border-radius: 63% 37% 54% 46% / 43% 37% 63% 57%;
+}
