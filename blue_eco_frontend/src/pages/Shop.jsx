@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { ShoppingCart, Package, Search } from 'lucide-react'
 import { getProducts } from '../lib/inventoryApi'
 import { useCart } from '../context/CartContext'
+import { LoadingState } from '../components/ui'
 
 export default function Shop() {
   const [products, setProducts] = useState([])
@@ -37,29 +38,29 @@ export default function Shop() {
   }
 
   return (
-    <div>
+    <div className="font-['Plus_Jakarta_Sans']">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-xl font-semibold text-ink">Products</h1>
+        <h1 className="text-2xl font-extrabold text-ink sm:text-3xl">Products</h1>
         <button
           onClick={() => navigate('/cart')}
-          className="relative rounded-md border border-border bg-surface p-2.5 text-ink hover:bg-canvas"
+          className="relative flex h-11 w-11 items-center justify-center rounded-full bg-white text-ink/60 shadow-sm hover:text-ink"
         >
           <ShoppingCart size={18} />
           {items.length > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-brand-500 text-white text-xs flex items-center justify-center">
+            <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-brand-500 text-xs font-bold text-white">
               {items.length}
             </span>
           )}
         </button>
       </div>
 
-      <div className="mt-4 relative">
-        <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-soft" />
+      <div className="relative mt-4">
+        <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink/30" />
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search"
-          className="w-full rounded-full border border-border bg-surface pl-10 pr-4 py-2.5 text-sm focus:border-brand-500"
+          className="w-full rounded-full border border-ink/10 bg-white py-2.5 pl-10 pr-4 text-sm text-ink placeholder:text-ink/30 transition focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-400/30"
         />
       </div>
 
@@ -68,8 +69,8 @@ export default function Shop() {
           <button
             key={c}
             onClick={() => setCategory(c)}
-            className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium ${
-              category === c ? 'bg-brand-700 text-white' : 'bg-surface border border-border text-ink-soft'
+            className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+              category === c ? 'bg-ink text-white' : 'bg-white text-ink/50 shadow-sm hover:text-ink'
             }`}
           >
             {c}
@@ -78,32 +79,34 @@ export default function Shop() {
       </div>
 
       {loading ? (
-        <p className="mt-6 text-sm text-ink-soft">Loading products…</p>
+        <div className="mt-6">
+          <LoadingState label="Loading products…" />
+        </div>
       ) : (
-        <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
           {filtered.map((p) => (
             <Link
               to={`/shop/${p.id}`}
               key={p.id}
-              className="rounded-xl border border-border bg-surface p-3 flex flex-col hover:border-brand-500/40"
+              className="flex flex-col rounded-2xl bg-white p-3 shadow-sm transition hover:shadow-md"
             >
-              <div className="flex items-start justify-between mb-1">
-                <span className="text-xs text-ink-soft">{p.form || p.sku}</span>
+              <div className="mb-1 flex items-start justify-between">
+                <span className="text-xs text-ink/40">{p.form || p.sku}</span>
               </div>
-              <div className="h-28 rounded-lg bg-canvas flex items-center justify-center overflow-hidden mb-2">
+              <div className="mb-2 flex h-28 items-center justify-center overflow-hidden rounded-xl bg-brand-100">
                 {p.image_path ? (
-                  <img src={p.image_path} alt={p.name} className="w-full h-full object-cover" />
+                  <img src={p.image_path} alt={p.name} className="h-full w-full object-cover" />
                 ) : (
-                  <Package className="text-ink-soft" size={28} />
+                  <Package className="text-ink/20" size={28} />
                 )}
               </div>
-              <p className="text-sm font-medium text-ink leading-tight">
-                {p.name} {p.weight && <span className="text-ink-soft font-normal">{p.weight}g</span>}
+              <p className="text-sm font-semibold leading-tight text-ink">
+                {p.name} {p.weight && <span className="font-normal text-ink/40">{p.weight}g</span>}
               </p>
-              <p className="text-xs text-brand-600 font-medium mt-1">{p.stock_quantity} in stock</p>
+              <p className="mt-1 text-xs font-medium text-brand-700">{p.stock_quantity} in stock</p>
               <div className="mt-2 flex items-center justify-between">
-                <p className="text-xs text-ink-soft">
-                  Price: <span className="text-sm font-semibold text-ink">₱{Number(p.price).toFixed(0)}</span>
+                <p className="text-xs text-ink/40">
+                  Price: <span className="text-sm font-bold text-ink">₱{Number(p.price).toFixed(0)}</span>
                 </p>
                 <button
                   onClick={(e) => {
@@ -111,7 +114,7 @@ export default function Shop() {
                     handleAdd(p)
                   }}
                   disabled={p.stock_quantity <= 0}
-                  className="w-8 h-8 rounded-full bg-brand-700 hover:bg-brand-600 disabled:opacity-40 text-white flex items-center justify-center text-lg leading-none"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-lg font-bold leading-none text-white transition hover:bg-brand-700 disabled:opacity-40"
                 >
                   {justAdded === p.id ? '✓' : '+'}
                 </button>
@@ -119,7 +122,7 @@ export default function Shop() {
             </Link>
           ))}
           {filtered.length === 0 && (
-            <p className="text-sm text-ink-soft text-center py-10 col-span-full">No products found.</p>
+            <p className="col-span-full py-10 text-center text-sm text-ink/40">No products found.</p>
           )}
         </div>
       )}

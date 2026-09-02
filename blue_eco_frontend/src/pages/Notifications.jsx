@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Bell } from 'lucide-react'
 import { getNotifications, markNotificationRead, markAllNotificationsRead } from '../lib/notificationApi'
+import { PageHeader, EmptyState, LoadingState } from '../components/ui'
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([])
@@ -30,41 +32,41 @@ export default function Notifications() {
     load()
   }
 
-  if (loading) return <p className="text-sm text-ink-soft">Loading…</p>
+  if (loading) return <LoadingState />
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-xl font-semibold text-ink">
-          Notifications {unreadCount > 0 && <span className="text-brand-500">({unreadCount})</span>}
-        </h1>
-        {unreadCount > 0 && (
-          <button onClick={handleMarkAllRead} className="text-sm text-brand-600 hover:underline">
-            Mark all as read
-          </button>
-        )}
-      </div>
+    <div className="font-['Plus_Jakarta_Sans']">
+      <PageHeader
+        title={
+          <>
+            Notifications {unreadCount > 0 && <span className="text-brand-500">({unreadCount})</span>}
+          </>
+        }
+        actions={
+          unreadCount > 0 && (
+            <button onClick={handleMarkAllRead} className="text-sm font-semibold text-brand-500 hover:underline">
+              Mark all as read
+            </button>
+          )
+        }
+      />
 
       <div className="mt-4 space-y-2">
         {notifications.map((n) => (
           <div
             key={n.id}
-            className={`rounded-xl border border-border p-4 ${
-              n.read ? 'bg-surface' : 'bg-brand-50/50'
-            }`}
+            className={`rounded-2xl p-4 shadow-sm ${n.read ? 'bg-white' : 'bg-brand-100'}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="font-medium text-ink text-sm">{n.title}</p>
-                <p className="mt-1 text-sm text-ink-soft">{n.body}</p>
-                <p className="mt-1 text-xs text-ink-soft">
-                  {new Date(n.created_at).toLocaleString()}
-                </p>
+                <p className="text-sm font-bold text-ink">{n.title}</p>
+                <p className="mt-1 text-sm text-ink/60">{n.body}</p>
+                <p className="mt-1 text-xs text-ink/40">{new Date(n.created_at).toLocaleString()}</p>
               </div>
               {!n.read && (
                 <button
                   onClick={() => handleMarkRead(n.id)}
-                  className="shrink-0 text-xs text-brand-600 hover:underline"
+                  className="shrink-0 text-xs font-semibold text-brand-500 hover:underline"
                 >
                   Mark read
                 </button>
@@ -72,8 +74,9 @@ export default function Notifications() {
             </div>
           </div>
         ))}
+
         {notifications.length === 0 && (
-          <p className="text-sm text-ink-soft text-center py-8">No notifications yet.</p>
+          <EmptyState icon={Bell} title="No notifications yet" description="You're all caught up." />
         )}
       </div>
     </div>

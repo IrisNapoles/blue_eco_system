@@ -22,6 +22,13 @@ export const getNextBatchNumber = (productId) =>
   api
     .get('/admin/stock-batches/next-batch-number', { params: { product_id: productId } })
     .then((r) => r.data.suggested_batch_no)
+export const markBatchPrinted = (id) => api.patch(`/admin/stock-batches/${id}/mark-printed`)
+
+// --- Stock Movements (bazaar/event log) ---
+export const getStockMovements = () => api.get('/admin/stock-movements').then((r) => r.data)
+export const createStockMovement = (payload) => api.post('/admin/stock-movements', payload)
+export const markMovementReturned = (id) => api.patch(`/admin/stock-movements/${id}/mark-returned`)
+export const deleteStockMovement = (id) => api.delete(`/admin/stock-movements/${id}`)
 
 // --- Supplies ---
 export const getSupplies = () => api.get('/supplies').then((r) => r.data)

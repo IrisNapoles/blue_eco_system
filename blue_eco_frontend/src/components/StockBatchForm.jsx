@@ -46,6 +46,8 @@ export default function StockBatchForm({ products, onSubmit, onCancel, saving })
           {products.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
+              {p.weight ? ` — ${p.weight}g` : ''}
+              {p.sku ? ` (${p.sku})` : ''}
             </option>
           ))}
         </select>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { updateProfile } from '../lib/profileApi'
+import { styles } from '../components/ui'
 
 export default function AccountSettings() {
   const { user } = useAuth()
@@ -59,37 +60,29 @@ export default function AccountSettings() {
 
   const field = (label, key, required = false) => (
     <div>
-      <label className="block text-sm font-medium text-ink mb-1">{label}</label>
+      <label className={styles.label}>{label}</label>
       <input
         value={values[key]}
         onChange={(e) => update(key, e.target.value)}
         required={required}
-        className="w-full rounded-md border border-border px-3 py-2 text-sm focus:border-brand-500"
+        className={styles.input}
       />
     </div>
   )
 
   return (
-    <div className="max-w-lg mx-auto">
-      <h1 className="font-display text-xl font-semibold text-ink">Account Settings</h1>
+    <div className="mx-auto max-w-lg font-['Plus_Jakarta_Sans']">
+      <h1 className="text-2xl font-extrabold text-ink sm:text-3xl">Account Settings</h1>
 
-      <form onSubmit={handleSubmit} className="mt-4 rounded-xl border border-border bg-surface p-5 space-y-4">
-        {error && (
-          <div className="rounded-md bg-danger-50 border border-danger-500/30 px-3 py-2 text-sm text-danger-700">
-            {error}
-          </div>
-        )}
-        {success && (
-          <div className="rounded-md bg-brand-50 border border-brand-500/30 px-3 py-2 text-sm text-brand-600">
-            Changes saved.
-          </div>
-        )}
+      <form onSubmit={handleSubmit} className={`mt-4 space-y-4 ${styles.card}`}>
+        {error && <div className={styles.errorBox}>{error}</div>}
+        {success && <div className={styles.successBox}>Changes saved.</div>}
 
         {field('Full name', 'name', true)}
-        <p className="text-xs text-ink-soft -mt-2">{user?.email}</p>
+        <p className="-mt-2 text-xs text-ink/40">{user?.email}</p>
 
-        <div className="border-t border-border pt-4">
-          <p className="text-sm font-medium text-ink mb-3">Contact & Address</p>
+        <div className="border-t border-ink/10 pt-4">
+          <p className="mb-3 text-sm font-bold text-ink">Contact & Address</p>
           <div className="space-y-3">
             {field('Contact number', 'contact_number')}
             {field('Street / house no.', 'street_no')}
@@ -104,29 +97,29 @@ export default function AccountSettings() {
           </div>
         </div>
 
-        <div className="border-t border-border pt-4">
-          <p className="text-sm font-medium text-ink mb-3">Change Password</p>
+        <div className="border-t border-ink/10 pt-4">
+          <p className="mb-3 text-sm font-bold text-ink">Change Password</p>
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-ink mb-1">New password</label>
+              <label className={styles.label}>New password</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 minLength={8}
                 placeholder="Leave blank to keep current password"
-                className="w-full rounded-md border border-border px-3 py-2 text-sm focus:border-brand-500"
+                className={styles.input}
               />
             </div>
             {password && (
               <div>
-                <label className="block text-sm font-medium text-ink mb-1">Confirm new password</label>
+                <label className={styles.label}>Confirm new password</label>
                 <input
                   type="password"
                   value={passwordConfirm}
                   onChange={(e) => setPasswordConfirm(e.target.value)}
                   minLength={8}
-                  className="w-full rounded-md border border-border px-3 py-2 text-sm focus:border-brand-500"
+                  className={styles.input}
                 />
               </div>
             )}
@@ -134,11 +127,7 @@ export default function AccountSettings() {
         </div>
 
         <div className="flex justify-end pt-2">
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-60 px-5 py-2.5 text-sm font-medium text-white"
-          >
+          <button type="submit" disabled={saving} className={styles.btnPrimary}>
             {saving ? 'Saving…' : 'Save changes'}
           </button>
         </div>

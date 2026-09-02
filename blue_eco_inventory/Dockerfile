@@ -2,6 +2,7 @@ FROM php:8.4-cli
 
 # Install system dependencies needed by common Laravel extensions
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     git \
     curl \
     libpng-dev \
@@ -11,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     libzip-dev \
     zip \
     unzip \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions Laravel needs

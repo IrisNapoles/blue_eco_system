@@ -8,6 +8,7 @@ use App\Http\Controllers\WasteLogController;
 use App\Http\Controllers\SaleController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\StockBatchController;
+use App\Http\Controllers\StockMovementController;
 use App\Http\Controllers\PaymentSettingController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\AddressController;
@@ -37,6 +38,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Any logged-in user can VIEW stock batches (needed for Staff's near-expiry section)
     Route::get('/admin/stock-batches', [StockBatchController::class, 'index']);
+
+    // Any logged-in user can VIEW stock movements (Transfer Log tab is visible to all)
+    Route::get('/admin/stock-movements', [StockMovementController::class, 'index']);
 
     // Any logged-in user can view the GCash QR / Bank details
     Route::get('/payment-settings', [PaymentSettingController::class, 'show']);
@@ -69,6 +73,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/admin/stock-batches', [StockBatchController::class, 'store']);
         Route::get('/admin/stock-batches/next-batch-number', [StockBatchController::class, 'nextBatchNumber']);
         Route::patch('/admin/stock-batches/{id}/mark-printed', [StockBatchController::class, 'markPrinted']);
+
+        // Only Admin can manage stock movements (bazaar/event transfer log)
+        Route::post('/admin/stock-movements', [StockMovementController::class, 'store']);
+        Route::patch('/admin/stock-movements/{id}/mark-returned', [StockMovementController::class, 'markReturned']);
+        Route::delete('/admin/stock-movements/{id}', [StockMovementController::class, 'destroy']);
 
         // Admin order management
         Route::get('/admin/orders', [OrderController::class, 'adminIndex']);

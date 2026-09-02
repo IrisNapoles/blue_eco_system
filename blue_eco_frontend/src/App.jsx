@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import Placeholder from './pages/Placeholder'
 import Inventory from './pages/Inventory'
@@ -14,6 +15,7 @@ import Addresses from './pages/Addresses'
 import PaymentSettings from './pages/PaymentSettings'
 import Forecast from './pages/Forecast'
 import Reports from './pages/Reports'
+import Statistics from './pages/Statistics'
 import Users from './pages/Users'
 import ShippingRates from './pages/ShippingRates'
 import BarcodeStockout from './pages/BarcodeStockout'
@@ -23,6 +25,7 @@ import Cart from './pages/Cart'
 import Checkout from './pages/Checkout'
 import OrderDetail from './pages/OrderDetail'
 import AccountSettings from './pages/AccountSettings'
+import SettingsHub from './pages/Settings'
 import { CartProvider } from './context/CartContext'
 
 export default function App() {
@@ -32,6 +35,7 @@ export default function App() {
         <CartProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
 
           <Route
             element={
@@ -88,6 +92,14 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/statistics"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <Statistics />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Admin + distributor */}
             <Route path="/orders" element={<Orders />} />
@@ -95,6 +107,7 @@ export default function App() {
             {/* Any signed-in role */}
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/payment-settings" element={<PaymentSettings />} />
+            <Route path="/settings" element={<SettingsHub />} />
 
             {/* Distributor only */}
             <Route
