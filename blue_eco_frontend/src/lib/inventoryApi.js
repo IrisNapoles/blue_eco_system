@@ -22,12 +22,17 @@ export const getNextBatchNumber = (productId) =>
   api
     .get('/admin/stock-batches/next-batch-number', { params: { product_id: productId } })
     .then((r) => r.data.suggested_batch_no)
-export const markBatchPrinted = (id) => api.patch(`/admin/stock-batches/${id}/mark-printed`)
+export const markBatchPrinted = (id, payload) => api.patch(`/admin/stock-batches/${id}/mark-printed`, payload)
 
 // --- Stock Movements (bazaar/event log) ---
 export const getStockMovements = () => api.get('/admin/stock-movements').then((r) => r.data)
-export const createStockMovement = (payload) => api.post('/admin/stock-movements', payload)
-export const markMovementReturned = (id) => api.patch(`/admin/stock-movements/${id}/mark-returned`)
+// FormData now (so an optional photo of the transferred stock can be attached).
+export const createStockMovement = (payload) =>
+  api.post('/admin/stock-movements', payload, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+export const markMovementReturned = (id, payload) =>
+  api.patch(`/admin/stock-movements/${id}/mark-returned`, payload)
 export const deleteStockMovement = (id) => api.delete(`/admin/stock-movements/${id}`)
 
 // --- Supplies ---
@@ -50,5 +55,27 @@ export const lookupBarcode = (code) =>
 // Threshold used purely on the frontend to flag low stock — there's no
 // per-product reorder_level field on the backend (only Supply has one),
 // so this is a simple constant for now. Easy to make configurable later.
+// Physical storage locations. Add one here and it shows up everywhere:
+// the stock batch form, the per-warehouse stock columns, and the
+// transfer-log destination dropdown.
+export const WAREHOUSES = ['Farm Warehouse', 'Parañaque']
+// Label used for old batches saved before warehouses were required.
+export const UNASSIGNED_WAREHOUSE = 'Unassigned'
+
+// Some older batches were saved with a shorter/looser warehouse string
+// (e.g. "Farm" instead of "Farm Warehouse"). Fold those into the same
+// preset column/option instead of letting them show up as a look-alike
+// duplicate everywhere warehouses are listed or grouped.
+export function normalizeWarehouse(raw) {
+  if (!raw) return UNASSIGNED_WAREHOUSE
+  const trimmed = raw.trim()
+  const lower = trimmed.toLowerCase()
+  const match = WAREHOUSES.find((preset) => {
+    const presetLower = preset.toLowerCase()
+    return presetLower === lower || presetLower.startsWith(lower) || lower.startsWith(presetLower)
+  })
+  return match || trimmed
+}
+
 export const LOW_STOCK_THRESHOLD = 20
 export const NEAR_EXPIRY_DAYS = 30

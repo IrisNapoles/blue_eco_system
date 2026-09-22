@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/Modal'
 import ProductForm from '../components/ProductForm'
@@ -22,6 +22,8 @@ import {
   deleteSupply,
   LOW_STOCK_THRESHOLD,
   NEAR_EXPIRY_DAYS,
+  WAREHOUSES,
+  normalizeWarehouse,
 } from '../lib/inventoryApi'
 
 const TABS = ['Products', 'Stock Batches', 'Transfer Log', 'Supplies']
@@ -53,7 +55,7 @@ export default function Inventory() {
 
       <div className="mt-6">
         {tab === 'Products' && <ProductsTab isAdmin={isAdmin} />}
-        {tab === 'Stock Batches' && <StockBatchesTab isAdmin={isAdmin} />}
+        {tab === 'Stock Batches' && <StockBatchesTab isAdmin={isAdmin} currentUser={user} />}
         {tab === 'Transfer Log' && <TransferLogTab isAdmin={isAdmin} />}
         {tab === 'Supplies' && <SuppliesTab isAdmin={isAdmin} />}
       </div>
@@ -265,14 +267,20 @@ function ProductsTab({ isAdmin }) {
   )
 }
 
-// --- Stock Batches ---
-function StockBatchesTab({ isAdmin }) {
+// --- Stock Batches (grouped per product, with per-warehouse stock) ---
+function StockBatchesTab({ isAdmin, currentUser }) {
   const [batches, setBatches] = useState([])
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [printingBatch, setPrintingBatch] = useState(null)
+  const [reprintConfirmBatch, setReprintConfirmBatch] = useState(null)
+  const [reprintReasonInput, setReprintReasonInput] = useState('')
+  const [reprintReason, setReprintReason] = useState('')
+  const [warehouseFilter, setWarehouseFilter] = useState('All')
+  const [categoryFilter, setCategoryFilter] = useState('All')
+  const [expanded, setExpanded] = useState({})
 
   const load = useCallback(() => {
     setLoading(true)
@@ -305,12 +313,112 @@ function StockBatchesTab({ isAdmin }) {
     return diffDays >= 0 && diffDays <= NEAR_EXPIRY_DAYS
   }
 
+  const warehouseOf = (b) => normalizeWarehouse(b.warehouse)
+  const qtyOf = (b) => Number(b.quantity) || 0
+
+  // Any warehouse name that already exists in the data but isn't one of the
+  // presets still gets its own column, so nothing is ever hidden. Since
+  // movements now literally create a batch row at the destination
+  // warehouse, a destination like "Parañaque" already shows up here the
+  // moment a movement is logged — no extra bookkeeping needed.
+  const extraWarehouses = [...new Set(batches.map(warehouseOf))].filter(
+    (w) => !WAREHOUSES.includes(w)
+  )
+  const columns = [...WAREHOUSES, ...extraWarehouses]
+
+  const warehouseTotals = {}
+  for (const b of batches) {
+    const w = warehouseOf(b)
+    warehouseTotals[w] = (warehouseTotals[w] || 0) + qtyOf(b)
+  }
+  const grandTotal = batches.reduce((sum, b) => sum + qtyOf(b), 0)
+
+  const visible = batches.filter(
+    (b) =>
+      (warehouseFilter === 'All' || warehouseOf(b) === warehouseFilter) &&
+      (categoryFilter === 'All' || (b.product?.form || 'Other') === categoryFilter)
+  )
+
+  // Categories (product "form" — Tablet, Capsule, Powder…) present in the
+  // current stock, so the filter only ever lists options that exist.
+  const categories = [...new Set(batches.map((b) => b.product?.form || 'Other'))].sort((a, b) =>
+    a.localeCompare(b)
+  )
+
+  // Group the visible batches per product.
+  const groups = []
+  const byProduct = new Map()
+  for (const b of visible) {
+    const key = b.product?.id ?? `name:${b.product?.name}`
+    if (!byProduct.has(key)) {
+      const group = { key, product: b.product, batches: [], total: 0, perWarehouse: {} }
+      byProduct.set(key, group)
+      groups.push(group)
+    }
+    const group = byProduct.get(key)
+    group.batches.push(b)
+    group.total += qtyOf(b)
+    const w = warehouseOf(b)
+    group.perWarehouse[w] = (group.perWarehouse[w] || 0) + qtyOf(b)
+  }
+  groups.sort((a, b) => (a.product?.name || '').localeCompare(b.product?.name || ''))
+
+  const toggle = (key) => setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
+  const colCount = 3 + columns.length
+
   if (loading) return <p className="text-sm text-ink-soft">Loading stock batches…</p>
 
   return (
     <div>
-      {isAdmin && (
-        <div className="mb-4 flex justify-end">
+      {/* Per-warehouse totals */}
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {columns.map((w) => (
+          <div key={w} className="rounded-xl border border-border bg-surface px-4 py-3">
+            <p className="text-xs uppercase tracking-wide text-ink-soft">{w}</p>
+            <p className="mt-1 font-display text-2xl font-semibold tabular-nums text-ink">
+              {warehouseTotals[w] || 0}
+            </p>
+            <p className="text-xs text-ink-soft">units in stock</p>
+          </div>
+        ))}
+        <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+          <p className="text-xs uppercase tracking-wide text-brand-600">All warehouses</p>
+          <p className="mt-1 font-display text-2xl font-semibold tabular-nums text-brand-700">
+            {grandTotal}
+          </p>
+          <p className="text-xs text-brand-600">total units</p>
+        </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm focus:border-brand-500"
+          >
+            <option value="All">All categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          <select
+            value={warehouseFilter}
+            onChange={(e) => setWarehouseFilter(e.target.value)}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm focus:border-brand-500"
+          >
+            <option value="All">All warehouses</option>
+            {columns.map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {isAdmin && (
           <button
             onClick={() => setModalOpen(true)}
             disabled={products.length === 0}
@@ -318,122 +426,207 @@ function StockBatchesTab({ isAdmin }) {
           >
             + Add stock batch
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="overflow-x-auto rounded-xl border border-border bg-surface">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-ink-soft">
               <th className="px-4 py-3">Product</th>
-              <th className="px-4 py-3">Batch No.</th>
-              <th className="px-4 py-3">Quantity</th>
-              <th className="px-4 py-3">Warehouse</th>
-              <th className="px-4 py-3">Best Before</th>
-              <th className="px-4 py-3">Barcodes</th>
-              {isAdmin && <th className="px-4 py-3"></th>}
+              <th className="px-4 py-3 text-right">Total Stock</th>
+              {columns.map((w) => (
+                <th key={w} className="px-4 py-3 text-right">
+                  {w}
+                </th>
+              ))}
+              <th className="px-4 py-3 text-right">Batches</th>
             </tr>
           </thead>
           <tbody>
-            {batches.map((b) => {
-              const nearExpiry = isNearExpiry(b.best_before)
+            {groups.map((g) => {
+              const isOpen = !!expanded[g.key]
               return (
-                <tr
-                  key={b.id}
-                  className={`border-b border-border last:border-0 transition-colors ${
-                    nearExpiry ? 'bg-danger-50/40 hover:bg-danger-50/70' : 'hover:bg-canvas'
-                  }`}
-                >
-                  <td className="px-4 py-3 font-medium text-ink">{b.product?.name}</td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center rounded-md bg-canvas px-2 py-1 font-mono text-xs text-ink-soft">
-                      {b.batch_no}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 tabular-nums text-ink">{b.quantity}</td>
-                  <td className="px-4 py-3">
-                    {b.warehouse ? (
-                      <span className="inline-flex items-center rounded-full bg-canvas px-2 py-0.5 text-xs text-ink-soft">
-                        {b.warehouse}
-                      </span>
-                    ) : (
-                      <span className="text-ink-soft">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {b.best_before ? (
-                      <span
-                        className={
-                          nearExpiry
-                            ? 'inline-flex items-center gap-1.5 rounded-full bg-danger-100 px-2 py-0.5 text-xs font-medium text-danger-700'
-                            : 'text-ink'
-                        }
-                      >
-                        {nearExpiry && (
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                            className="h-3 w-3"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        )}
-                        {b.best_before}
-                      </span>
-                    ) : (
-                      <span className="text-ink-soft">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={
-                        b.printed
-                          ? 'inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600'
-                          : 'inline-flex items-center gap-1.5 rounded-full bg-alert-50 px-2 py-0.5 text-xs font-medium text-alert-700'
-                      }
-                    >
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${b.printed ? 'bg-brand-500' : 'bg-alert-500'}`}
-                      />
-                      {b.printed ? 'Printed' : 'Not printed'}
-                    </span>
-                  </td>
-                  {isAdmin && (
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => setPrintingBatch(b)}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-canvas"
-                      >
+                <Fragment key={g.key}>
+                  <tr
+                    onClick={() => toggle(g.key)}
+                    className="cursor-pointer border-b border-border last:border-0 hover:bg-canvas"
+                  >
+                    <td className="px-4 py-3 font-medium text-ink">
+                      <span className="inline-flex items-center gap-2">
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
                           viewBox="0 0 24 24"
                           fill="none"
                           stroke="currentColor"
-                          strokeWidth="1.75"
-                          className="h-3.5 w-3.5"
+                          strokeWidth="2"
+                          className={`h-3.5 w-3.5 text-ink-soft transition-transform ${
+                            isOpen ? 'rotate-90' : ''
+                          }`}
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z"
-                          />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                         </svg>
-                        {b.printed ? 'Reprint' : 'Print'}
-                      </button>
+                        {g.product?.name}
+                        {g.product?.weight ? (
+                          <span className="text-xs font-normal text-ink-soft">
+                            — {g.product.weight}g
+                          </span>
+                        ) : null}
+                      </span>
                     </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-ink">
+                      {g.total}
+                      {g.total <= LOW_STOCK_THRESHOLD && (
+                        <span className="ml-2 inline-flex items-center rounded-full bg-alert-50 px-2 py-0.5 text-xs font-medium text-alert-700">
+                          Low
+                        </span>
+                      )}
+                    </td>
+                    {columns.map((w) => (
+                      <td key={w} className="px-4 py-3 text-right tabular-nums text-ink-soft">
+                        {g.perWarehouse[w] ? (
+                          <span className="text-ink">{g.perWarehouse[w]}</span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-4 py-3 text-right tabular-nums text-ink-soft">
+                      {g.batches.length}
+                    </td>
+                  </tr>
+
+                  {isOpen && (
+                    <tr className="border-b border-border last:border-0 bg-canvas/60">
+                      <td colSpan={colCount} className="px-4 py-3">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs uppercase tracking-wide text-ink-soft">
+                              <th className="px-2 py-2">Batch No.</th>
+                              <th className="px-2 py-2">Warehouse</th>
+                              <th className="px-2 py-2 text-right">Quantity</th>
+                              <th className="px-2 py-2">Best Before</th>
+                              <th className="px-2 py-2">Barcodes</th>
+                              {isAdmin && <th className="px-2 py-2"></th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.batches.map((b) => {
+                              const nearExpiry = isNearExpiry(b.best_before)
+                              return (
+                                <tr
+                                  key={b.id}
+                                  className={`border-t border-border ${
+                                    nearExpiry ? 'bg-danger-50/40' : ''
+                                  }`}
+                                >
+                                  <td className="px-2 py-2">
+                                    <span className="inline-flex items-center rounded-md bg-surface px-2 py-1 font-mono text-xs text-ink-soft">
+                                      {b.batch_no}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-2">
+                                    <span className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 text-xs text-ink-soft">
+                                      {warehouseOf(b)}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-ink">
+                                    {qtyOf(b)}
+                                  </td>
+                                  <td className="px-2 py-2">
+                                    {b.best_before ? (
+                                      <span
+                                        className={
+                                          nearExpiry
+                                            ? 'inline-flex items-center gap-1.5 rounded-full bg-danger-100 px-2 py-0.5 text-xs font-medium text-danger-700'
+                                            : 'text-ink'
+                                        }
+                                      >
+                                        {nearExpiry && (
+                                          <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            viewBox="0 0 24 24"
+                                            fill="currentColor"
+                                            className="h-3 w-3"
+                                          >
+                                            <path
+                                              fillRule="evenodd"
+                                              d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z"
+                                              clipRule="evenodd"
+                                            />
+                                          </svg>
+                                        )}
+                                        {b.best_before}
+                                      </span>
+                                    ) : (
+                                      <span className="text-ink-soft">—</span>
+                                    )}
+                                  </td>
+                                  <td className="px-2 py-2">
+                                    <span
+                                      className={
+                                        b.printed
+                                          ? 'inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600'
+                                          : 'inline-flex items-center gap-1.5 rounded-full bg-alert-50 px-2 py-0.5 text-xs font-medium text-alert-700'
+                                      }
+                                    >
+                                      <span
+                                        className={`h-1.5 w-1.5 rounded-full ${
+                                          b.printed ? 'bg-brand-500' : 'bg-alert-500'
+                                        }`}
+                                      />
+                                      {b.printed ? 'Printed' : 'Not printed'}
+                                    </span>
+                                  </td>
+                                  {isAdmin && (
+                                    <td className="px-2 py-2 text-right whitespace-nowrap">
+                                      {b.printed ? (
+                                        <div className="flex flex-col items-end gap-0.5">
+                                          <button
+                                            disabled
+                                            title="Already printed — for security, reprinting needs confirmation."
+                                            className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-border bg-canvas px-2.5 py-1.5 text-xs font-medium text-ink-soft opacity-70"
+                                          >
+                                            Printed
+                                          </button>
+                                          <button
+                                            onClick={() => setReprintConfirmBatch(b)}
+                                            className="text-[11px] text-ink-soft underline hover:text-brand-600"
+                                          >
+                                            Reprint anyway
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          onClick={() => setPrintingBatch(b)}
+                                          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-canvas"
+                                        >
+                                          Print
+                                        </button>
+                                      )}
+                                    </td>
+                                  )}
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
                   )}
-                </tr>
+                </Fragment>
               )
             })}
-            {batches.length === 0 && (
+            {groups.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 7 : 6} className="px-4 py-8 text-center text-ink-soft">
-                  No stock batches yet.
+                <td colSpan={colCount} className="px-4 py-8 text-center text-ink-soft">
+                  {batches.length === 0
+                    ? 'No stock batches yet.'
+                    : categoryFilter !== 'All' && warehouseFilter !== 'All'
+                    ? `No ${categoryFilter} stock in ${warehouseFilter}.`
+                    : categoryFilter !== 'All'
+                    ? `No ${categoryFilter} stock.`
+                    : `No stock in ${warehouseFilter}.`}
                 </td>
               </tr>
             )}
@@ -456,12 +649,81 @@ function StockBatchesTab({ isAdmin }) {
         <PrintBarcodesModal
           batch={printingBatch}
           product={printingBatch.product}
-          onClose={() => setPrintingBatch(null)}
+          reprintReason={reprintReason}
+          onClose={() => {
+            setPrintingBatch(null)
+            setReprintReason('')
+          }}
           onPrinted={() => {
             setPrintingBatch(null)
+            setReprintReason('')
             load()
           }}
         />
+      )}
+
+      {reprintConfirmBatch && (
+        <Modal
+          title="Reprint barcode?"
+          onClose={() => {
+            setReprintConfirmBatch(null)
+            setReprintReasonInput('')
+          }}
+        >
+          <p className="text-sm text-ink-soft">
+            <strong className="text-ink">{reprintConfirmBatch.batch_no}</strong> was already printed.
+            Reprinting can create duplicate barcode labels for the same batch — only do this if the
+            original label was lost, damaged, or misprinted.
+          </p>
+          <p className="mt-2 text-xs text-ink-soft">
+            This will be recorded under your account
+            {currentUser?.name || currentUser?.email ? (
+              <>
+                {' '}
+                (<strong className="text-ink">{currentUser?.name || currentUser?.email}</strong>)
+              </>
+            ) : null}
+            .
+          </p>
+          <div className="mt-3">
+            <label className="block text-sm font-medium text-ink mb-1">
+              Reason for reprint (required)
+            </label>
+            <textarea
+              value={reprintReasonInput}
+              onChange={(e) => setReprintReasonInput(e.target.value)}
+              rows={2}
+              placeholder="e.g. Original label was damaged during transfer"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm focus:border-brand-500"
+            />
+            <p className="mt-1 text-xs text-ink-soft">
+              This gets saved with the batch so there's a record of who reprinted it and why.
+            </p>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setReprintConfirmBatch(null)
+                setReprintReasonInput('')
+              }}
+              className="rounded-md border border-border px-4 py-2 text-sm text-ink-soft hover:bg-canvas"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                setReprintReason(reprintReasonInput.trim())
+                setPrintingBatch(reprintConfirmBatch)
+                setReprintConfirmBatch(null)
+                setReprintReasonInput('')
+              }}
+              disabled={!reprintReasonInput.trim()}
+              className="rounded-md bg-danger-500 hover:bg-danger-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white"
+            >
+              Yes, reprint anyway
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   )
@@ -474,6 +736,10 @@ function TransferLogTab({ isAdmin }) {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [lightbox, setLightbox] = useState(null)
+  const [returnMovement, setReturnMovement] = useState(null)
+  const [returnQtyInput, setReturnQtyInput] = useState('')
+  const [returningId, setReturningId] = useState(null)
 
   const [loadError, setLoadError] = useState(null)
 
@@ -510,9 +776,25 @@ function TransferLogTab({ isAdmin }) {
     }
   }
 
-  async function handleMarkReturned(id) {
-    await markMovementReturned(id)
-    load()
+  // How much of a movement is still out (not yet returned to the origin
+  // warehouse). Falls back to the whole quantity for movements saved
+  // before partial returns existed (no quantity_returned field yet).
+  const returnedQtyOf = (m) => Number(m.quantity_returned) || 0
+  const remainingQtyOf = (m) => Math.max(Number(m.quantity) - returnedQtyOf(m), 0)
+
+  async function handleConfirmReturn() {
+    if (!returnMovement) return
+    const qty = Number(returnQtyInput)
+    if (!qty || qty <= 0) return
+    setReturningId(returnMovement.id)
+    try {
+      await markMovementReturned(returnMovement.id, { quantity_returned: qty })
+      setReturnMovement(null)
+      setReturnQtyInput('')
+      load()
+    } finally {
+      setReturningId(null)
+    }
   }
 
   if (loading) return <p className="text-ink-soft">Loading…</p>
@@ -540,6 +822,7 @@ function TransferLogTab({ isAdmin }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-ink-soft">
+              <th className="px-4 py-3">Photo</th>
               <th className="px-4 py-3">Product</th>
               <th className="px-4 py-3">Batch No.</th>
               <th className="px-4 py-3">Quantity</th>
@@ -550,48 +833,84 @@ function TransferLogTab({ isAdmin }) {
             </tr>
           </thead>
           <tbody>
-            {movements.map((m) => (
-              <tr key={m.id} className="border-b border-border last:border-0 hover:bg-canvas">
-                <td className="px-4 py-3 font-medium text-ink">{m.stock_batch?.product?.name}</td>
-                <td className="px-4 py-3">
-                  <span className="inline-flex items-center rounded-md bg-canvas px-2 py-1 font-mono text-xs text-ink-soft">
-                    {m.stock_batch?.batch_no}
-                  </span>
-                </td>
-                <td className="px-4 py-3 tabular-nums text-ink">{m.quantity}</td>
-                <td className="px-4 py-3 text-ink">{m.destination}</td>
-                <td className="px-4 py-3 text-ink-soft">{m.moved_at}</td>
-                <td className="px-4 py-3">
-                  <span
-                    className={
-                      m.returned_at
-                        ? 'inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600'
-                        : 'inline-flex items-center gap-1.5 rounded-full bg-alert-50 px-2 py-0.5 text-xs font-medium text-alert-700'
-                    }
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${m.returned_at ? 'bg-brand-500' : 'bg-alert-500'}`}
-                    />
-                    {m.returned_at ? `Returned ${m.returned_at}` : 'Out'}
-                  </span>
-                </td>
-                {isAdmin && (
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    {!m.returned_at && (
+            {movements.map((m) => {
+              const returnedQty = returnedQtyOf(m)
+              const remainingQty = remainingQtyOf(m)
+              const isFullyReturned = !!m.returned_at || remainingQty <= 0
+              const isPartiallyReturned = !isFullyReturned && returnedQty > 0
+              return (
+                <tr key={m.id} className="border-b border-border last:border-0 hover:bg-canvas">
+                  <td className="px-4 py-3">
+                    {m.photo_path ? (
                       <button
-                        onClick={() => handleMarkReturned(m.id)}
-                        className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-canvas"
+                        onClick={() => setLightbox(m.photo_path)}
+                        className="block h-10 w-10 overflow-hidden rounded-md border border-border"
                       >
-                        Mark returned
+                        <img src={m.photo_path} alt="" className="h-full w-full object-cover" />
                       </button>
+                    ) : (
+                      <span className="text-ink-soft">—</span>
                     )}
                   </td>
-                )}
-              </tr>
-            ))}
+                  <td className="px-4 py-3 font-medium text-ink">{m.stock_batch?.product?.name}</td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center rounded-md bg-canvas px-2 py-1 font-mono text-xs text-ink-soft">
+                      {m.stock_batch?.batch_no}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 tabular-nums text-ink">
+                    {m.quantity}
+                    {returnedQty > 0 && (
+                      <span className="ml-1.5 text-xs text-ink-soft">
+                        ({returnedQty} returned{remainingQty > 0 ? `, ${remainingQty} out` : ''})
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-ink">{m.destination}</td>
+                  <td className="px-4 py-3 text-ink-soft">{m.moved_at}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={
+                        isFullyReturned
+                          ? 'inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600'
+                          : isPartiallyReturned
+                          ? 'inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700'
+                          : 'inline-flex items-center gap-1.5 rounded-full bg-alert-50 px-2 py-0.5 text-xs font-medium text-alert-700'
+                      }
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          isFullyReturned ? 'bg-brand-500' : isPartiallyReturned ? 'bg-amber-500' : 'bg-alert-500'
+                        }`}
+                      />
+                      {isFullyReturned
+                        ? `Returned${m.returned_at ? ` ${m.returned_at}` : ''}`
+                        : isPartiallyReturned
+                        ? 'Partially returned'
+                        : 'Out'}
+                    </span>
+                  </td>
+                  {isAdmin && (
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {!isFullyReturned && (
+                        <button
+                          onClick={() => {
+                            setReturnMovement(m)
+                            setReturnQtyInput(String(remainingQty))
+                          }}
+                          className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-canvas"
+                        >
+                          Log return
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              )
+            })}
             {movements.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 7 : 6} className="px-4 py-8 text-center text-ink-soft">
+                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-8 text-center text-ink-soft">
                   No stock movements logged yet.
                 </td>
               </tr>
@@ -609,6 +928,75 @@ function TransferLogTab({ isAdmin }) {
             saving={saving}
           />
         </Modal>
+      )}
+
+      {returnMovement && (
+        <Modal
+          title="Log return"
+          onClose={() => {
+            setReturnMovement(null)
+            setReturnQtyInput('')
+          }}
+        >
+          <p className="text-sm text-ink-soft">
+            <strong className="text-ink">{returnMovement.quantity}</strong> units of{' '}
+            <strong className="text-ink">{returnMovement.stock_batch?.product?.name}</strong> (batch{' '}
+            {returnMovement.stock_batch?.batch_no}) were moved to{' '}
+            <strong className="text-ink">{returnMovement.destination}</strong>. How many are being
+            returned to the origin warehouse now?
+          </p>
+          <div className="mt-3">
+            <label className="block text-sm font-medium text-ink mb-1">Quantity being returned</label>
+            <input
+              type="number"
+              min="1"
+              max={remainingQtyOf(returnMovement)}
+              value={returnQtyInput}
+              onChange={(e) => setReturnQtyInput(e.target.value)}
+              className="w-full rounded-md border border-border px-3 py-2 text-sm focus:border-brand-500"
+            />
+            <p className="mt-1 text-xs text-ink-soft">
+              Up to {remainingQtyOf(returnMovement)} still out. Leave it lower if only some of the
+              stock is coming back — you can log another return later for the rest.
+            </p>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setReturnMovement(null)
+                setReturnQtyInput('')
+              }}
+              className="rounded-md border border-border px-4 py-2 text-sm text-ink-soft hover:bg-canvas"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmReturn}
+              disabled={
+                returningId === returnMovement.id ||
+                !returnQtyInput ||
+                Number(returnQtyInput) <= 0 ||
+                Number(returnQtyInput) > remainingQtyOf(returnMovement)
+              }
+              className="rounded-md bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white"
+            >
+              {returningId === returnMovement.id ? 'Saving…' : 'Confirm return'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+        >
+          <img
+            src={lightbox}
+            alt="Transfer proof"
+            className="max-h-[85vh] max-w-full rounded-lg object-contain"
+          />
+        </div>
       )}
     </div>
   )

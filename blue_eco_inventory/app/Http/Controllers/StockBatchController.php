@@ -11,7 +11,9 @@ class StockBatchController extends Controller
 {
     public function index()
     {
-        return StockBatch::with('product')->latest()->get();
+        // Eager-load movements so StockBatch's quantity_out/quantity_available
+        // accessors don't fire one extra query per batch.
+        return StockBatch::with(['product', 'movements'])->latest()->get();
     }
 
     public function store(Request $request)
@@ -20,8 +22,8 @@ class StockBatchController extends Controller
             'product_id' => 'required|exists:products,id',
             'batch_no' => 'required|string|max:100',
             'quantity' => 'required|integer|min:1',
-            'warehouse' => 'nullable|string',
-            'best_before' => 'nullable|date',
+            'warehouse' => 'required|string',
+            'best_before' => 'required|date',
         ]);
 
         return DB::transaction(function () use ($validated) {
@@ -92,12 +94,29 @@ class StockBatchController extends Controller
     }
 
     // Marks a batch's barcodes as printed so the app doesn't show the print
-    // button as "unprinted" again after a refresh/restart.
-    public function markPrinted($id)
+    // button as "unprinted" again after a refresh/restart. The first print
+    // just flips the flag; a *re*print (already printed before) requires a
+    // reason and gets attributed to whoever is authenticated right now —
+    // never trust a "who" field sent by the client for that.
+    public function markPrinted(Request $request, $id)
     {
         $batch = StockBatch::findOrFail($id);
-        $batch->update(['printed' => true]);
+        $wasAlreadyPrinted = $batch->printed;
 
-        return response()->json($batch->load('product'));
+        $validated = $request->validate([
+            'reprint_reason' => [$wasAlreadyPrinted ? 'required' : 'nullable', 'string', 'max:1000'],
+        ]);
+
+        $batch->printed = true;
+
+        if ($wasAlreadyPrinted) {
+            $batch->reprint_reason = $validated['reprint_reason'];
+            $batch->reprinted_by = $request->user()->id;
+            $batch->reprinted_at = now();
+        }
+
+        $batch->save();
+
+        return response()->json($batch->fresh()->load(['product', 'reprintedBy']));
     }
 }

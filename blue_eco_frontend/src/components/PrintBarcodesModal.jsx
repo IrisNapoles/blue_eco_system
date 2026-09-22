@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import JsBarcode from 'jsbarcode'
 import { markBatchPrinted } from '../lib/inventoryApi'
 
-export default function PrintBarcodesModal({ batch, product, onClose, onPrinted }) {
+export default function PrintBarcodesModal({ batch, product, onClose, onPrinted, reprintReason }) {
   const containerRef = useRef(null)
   const [marking, setMarking] = useState(false)
 
@@ -31,7 +31,7 @@ export default function PrintBarcodesModal({ batch, product, onClose, onPrinted 
   async function handleMarkPrinted() {
     setMarking(true)
     try {
-      await markBatchPrinted(batch.id)
+      await markBatchPrinted(batch.id, reprintReason ? { reprint_reason: reprintReason } : undefined)
       onPrinted?.()
     } finally {
       setMarking(false)
@@ -49,6 +49,9 @@ export default function PrintBarcodesModal({ batch, product, onClose, onPrinted 
             <p className="text-xs text-ink-soft mt-0.5">
               Batch {batch.batch_no} · {labelCount} label{labelCount === 1 ? '' : 's'}
             </p>
+            {reprintReason && (
+              <p className="text-xs text-alert-700 mt-0.5">Reprint reason: {reprintReason}</p>
+            )}
           </div>
           <button onClick={onClose} className="text-ink-soft hover:text-ink text-sm" aria-label="Close">
             ✕
