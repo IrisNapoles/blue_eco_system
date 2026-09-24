@@ -363,6 +363,19 @@ function StockBatchesTab({ isAdmin, currentUser }) {
   }
   groups.sort((a, b) => (a.product?.name || '').localeCompare(b.product?.name || ''))
 
+  // FIFO within each product: soonest-to-expire first, batches with no
+  // expiry treated as "never expires" and shown last — same order
+  // StockService::deduct already sells from, so this screen always shows
+  // staff which batch should be sold/moved out first.
+  for (const g of groups) {
+    g.batches.sort((a, b) => {
+      const aDate = a.best_before ? new Date(a.best_before).getTime() : Infinity
+      const bDate = b.best_before ? new Date(b.best_before).getTime() : Infinity
+      if (aDate !== bDate) return aDate - bDate
+      return (a.id ?? 0) - (b.id ?? 0)
+    })
+  }
+
   const toggle = (key) => setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
   const colCount = 3 + columns.length
 
@@ -511,8 +524,9 @@ function StockBatchesTab({ isAdmin, currentUser }) {
                             </tr>
                           </thead>
                           <tbody>
-                            {g.batches.map((b) => {
+                            {g.batches.map((b, idx) => {
                               const nearExpiry = isNearExpiry(b.best_before)
+                              const sellFirst = idx === 0 && g.batches.length > 1
                               return (
                                 <tr
                                   key={b.id}
@@ -524,6 +538,11 @@ function StockBatchesTab({ isAdmin, currentUser }) {
                                     <span className="inline-flex items-center rounded-md bg-surface px-2 py-1 font-mono text-xs text-ink-soft">
                                       {b.batch_no}
                                     </span>
+                                    {sellFirst && (
+                                      <span className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                                        Sell first · FIFO
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="px-2 py-2">
                                     <span className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 text-xs text-ink-soft">

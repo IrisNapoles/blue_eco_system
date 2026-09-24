@@ -82,6 +82,7 @@ class ForecastResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 MIN_RECOMMENDED_POINTS = 14  # ~2 weeks of daily data for a even half-decent trend
+MIN_POINTS_FOR_YEARLY_SEASONALITY = 365  # need at least ~1 full year to detect a yearly cycle
 
 
 def run_prophet_forecast(history: list[HistoryPoint], periods: int) -> tuple[pd.DataFrame, Optional[str]]:
@@ -100,7 +101,11 @@ def run_prophet_forecast(history: list[HistoryPoint], periods: int) -> tuple[pd.
     model = Prophet(
         daily_seasonality=False,
         weekly_seasonality=len(df) >= MIN_RECOMMENDED_POINTS,
-        yearly_seasonality=False,
+        # Turned on (previously hardcoded False) so multi-year history can
+        # surface the yearly harvest-season / December pattern. Still gated
+        # on having a full year of data, same reasoning as weekly_seasonality
+        # above, so it doesn't try to fit a yearly cycle off a few weeks.
+        yearly_seasonality=len(df) >= MIN_POINTS_FOR_YEARLY_SEASONALITY,
         interval_width=0.80,
     )
     model.fit(df)

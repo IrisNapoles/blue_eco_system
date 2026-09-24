@@ -99,6 +99,7 @@ function TopBar({ firstName, subtitle, search, setSearch }) {
 function AdminDashboard({ user }) {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [analyticsTab, setAnalyticsTab] = useState('products') // 'products' | 'distributors' | 'movement'
   const [products, setProducts] = useState([])
   const [allUsers, setAllUsers] = useState([])
   const [orders, setOrders] = useState([])
@@ -221,6 +222,46 @@ function AdminDashboard({ user }) {
     ...top3.map(([name, qty], i) => ({ label: name, value: qty, color: topProductColors[i] })),
     ...(othersTotal > 0 ? [{ label: 'Others', value: othersTotal, color: topProductColors[3] }] : []),
   ]
+
+  // Distributor spend split, feeds the Top Distributors card — total order
+  // value (paid + pending, same convention as Total Sales) per distributor.
+  const distributorTotals = {}
+  orders.forEach((o) => {
+    const name = o.distributor?.name || 'Unknown'
+    distributorTotals[name] = (distributorTotals[name] || 0) + Number(o.total_amount || 0)
+  })
+  const sortedDistributors = Object.entries(distributorTotals).sort((a, b) => b[1] - a[1])
+  const distTop3 = sortedDistributors.slice(0, 3)
+  const distOthersTotal = sortedDistributors.slice(3).reduce((sum, [, amt]) => sum + amt, 0)
+  const totalDistributorSpend = sortedDistributors.reduce((sum, [, amt]) => sum + amt, 0)
+  const distributorBreakdown = [
+    ...distTop3.map(([name, amt], i) => ({ label: name, value: amt, color: topProductColors[i] })),
+    ...(distOthersTotal > 0 ? [{ label: 'Others', value: distOthersTotal, color: topProductColors[3] }] : []),
+  ]
+
+  // Fast vs Slow Moving Products — ranks every product by units sold in the
+  // last 30 days. `salesToday` (despite its name) comes from /staff/sales,
+  // which returns full sale history, and already covers BOTH walk-in sales
+  // and shipped distributor orders (OrderController::updateStatus creates a
+  // matching Sale when an order ships), so this reflects real movement
+  // across both channels.
+  const MOVEMENT_WINDOW_DAYS = 30
+  const movementCutoff = new Date(now.getTime() - MOVEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+  const unitsSoldByProduct = {}
+  salesToday.forEach((s) => {
+    if (new Date(s.created_at) < movementCutoff) return
+    s.items?.forEach((it) => {
+      const pid = it.product_id
+      unitsSoldByProduct[pid] = (unitsSoldByProduct[pid] || 0) + Number(it.quantity || 0)
+    })
+  })
+  const movementRanked = products.map((p) => ({
+    id: p.id,
+    name: p.name,
+    unitsSold: unitsSoldByProduct[p.id] || 0,
+  }))
+  const fastMoving = [...movementRanked].sort((a, b) => b.unitsSold - a.unitsSold).slice(0, 5)
+  const slowMoving = [...movementRanked].sort((a, b) => a.unitsSold - b.unitsSold).slice(0, 5)
 
   return (
     <div className="font-['Plus_Jakarta_Sans']">
@@ -420,27 +461,78 @@ function AdminDashboard({ user }) {
 
       <div className="mt-4">
         <div className="rounded-[1.75rem] bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-ink">Top Products by Orders</h2>
-          <StockDonut
-            breakdown={productOrderBreakdown}
-            total={totalOrderedUnits}
-            loading={loading}
-            centerLabel="Units Ordered"
-          />
-          <p className="mt-4 text-center text-xs text-ink/40">
-            Share of ordered units per product, all time.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-[10px] text-ink/50">
-            {productOrderBreakdown.map((s) => (
-              <span key={s.label} className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
-                {s.label}
-              </span>
-            ))}
-            {productOrderBreakdown.length === 0 && !loading && (
-              <span>No orders yet.</span>
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-bold text-ink">Analytics</h2>
+            <div className="flex gap-1 rounded-full bg-brand-100 p-1">
+              {[
+                { key: 'products', label: 'Top Products' },
+                { key: 'distributors', label: 'Top Distributors' },
+                { key: 'movement', label: 'Fast vs Slow Moving' },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setAnalyticsTab(tab.key)}
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-bold transition ${
+                    analyticsTab === tab.key ? 'bg-white text-ink shadow-sm' : 'text-ink/50 hover:text-ink'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {analyticsTab === 'products' && (
+            <div>
+              <TopProductsBar
+                breakdown={productOrderBreakdown}
+                total={totalOrderedUnits}
+                loading={loading}
+                centerLabel="Units Ordered"
+              />
+              <p className="mt-4 text-center text-xs text-ink/40">
+                Share of ordered units per product, all time.
+              </p>
+            </div>
+          )}
+
+          {analyticsTab === 'distributors' && (
+            <div>
+              <TopProductsBar
+                breakdown={distributorBreakdown}
+                total={totalDistributorSpend}
+                loading={loading}
+                centerLabel="Total Order Value"
+                formatValue={formatPeso}
+              />
+              <p className="mt-4 text-center text-xs text-ink/40">
+                Share of total order value per distributor, all time.
+              </p>
+            </div>
+          )}
+
+          {analyticsTab === 'movement' && (
+            <div>
+              <p className="mt-4 text-xs text-ink/40">Units sold, last {MOVEMENT_WINDOW_DAYS} days</p>
+              <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
+                <MovementList
+                  title="🔥 Fast Moving"
+                  items={fastMoving}
+                  loading={loading}
+                  barColor="var(--color-accent-lime)"
+                  emptyLabel="No sales in this period yet."
+                />
+                <MovementList
+                  title="🐌 Slow Moving"
+                  items={slowMoving}
+                  loading={loading}
+                  barColor="var(--color-accent-orange)"
+                  emptyLabel="No products yet."
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -767,6 +859,83 @@ function StatCard({ label, value, sub, dark, trendIcon, changePct, changeInverte
           )}
         </div>
         {trendIcon}
+      </div>
+    </div>
+  )
+}
+
+function MovementList({ title, items, loading, barColor, emptyLabel }) {
+  const max = items.reduce((m, it) => Math.max(m, it.unitsSold), 0) || 1
+
+  return (
+    <div>
+      <h3 className="text-xs font-bold text-ink">{title}</h3>
+      <div className="mt-3 space-y-2.5">
+        {loading &&
+          [0, 1, 2].map((i) => (
+            <div key={i} className="h-2 w-full animate-pulse rounded-full bg-brand-100" style={{ backgroundColor: 'var(--color-brand-100)' }} />
+          ))}
+        {!loading && items.length === 0 && <p className="text-xs text-ink/40">{emptyLabel}</p>}
+        {!loading &&
+          items.map((it, i) => {
+            const widthPct = Math.max((it.unitsSold / max) * 100, 2)
+            return (
+              <div key={it.id}>
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="truncate text-ink/70">
+                    <span className="mr-1.5 font-bold text-ink/30">{i + 1}.</span>
+                    {it.name}
+                  </span>
+                  <span className="ml-2 shrink-0 font-bold text-ink">{it.unitsSold.toLocaleString()} units</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-brand-100)' }}>
+                  <div className="h-full rounded-full" style={{ width: `${widthPct}%`, backgroundColor: barColor }} />
+                </div>
+              </div>
+            )
+          })}
+      </div>
+    </div>
+  )
+}
+function TopProductsBar({ breakdown, total, loading, centerLabel = 'Units Ordered', formatValue = (v) => v.toLocaleString() }) {
+  const max = breakdown.reduce((m, b) => Math.max(m, b.value), 0) || 1
+
+  return (
+    <div className="mt-4">
+      <p className="text-center text-[10px] text-ink/40">
+        {centerLabel} · <span className="font-extrabold text-ink text-xs">{loading ? '—' : formatValue(total)}</span>
+      </p>
+      <div className="mt-4 space-y-3">
+        {!loading &&
+          breakdown.map((b) => {
+            const pct = Math.round((b.value / sum) * 100)
+            const widthPct = Math.max((b.value / max) * 100, 2) // keep a sliver visible for tiny values
+            return (
+              <div key={b.label}>
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="font-medium text-ink/70">{b.label}</span>
+                  <span className="font-bold text-ink">{formatValue(b.value)} <span className="font-normal text-ink/40">({pct}%)</span></span>
+                </div>
+                <div className="h-2.5 w-full overflow-hidden rounded-full bg-brand-100" style={{ backgroundColor: 'var(--color-brand-100)' }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${widthPct}%`, backgroundColor: b.color }}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        {!loading && breakdown.length === 0 && (
+          <p className="text-center text-xs text-ink/40">No data yet.</p>
+        )}
+        {loading && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-2.5 w-full animate-pulse rounded-full bg-brand-100" style={{ backgroundColor: 'var(--color-brand-100)' }} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -11,9 +11,14 @@ class StockBatchController extends Controller
 {
     public function index()
     {
-        // Eager-load movements so StockBatch's quantity_out/quantity_available
-        // accessors don't fire one extra query per batch.
-        return StockBatch::with(['product', 'movements'])->latest()->get();
+        // FIFO order — soonest-to-expire first, then oldest-received first
+        // for batches with no expiry — matching StockService::deduct's
+        // consumption order, so the Stock Batches screen always shows
+        // staff which batch should be sold/moved out first.
+        return StockBatch::with('product')
+            ->orderByRaw('best_before IS NULL, best_before ASC')
+            ->orderBy('created_at')
+            ->get();
     }
 
     public function store(Request $request)
@@ -55,12 +60,22 @@ class StockBatchController extends Controller
         $year = now()->year;
         $code = $product->system_code ?: strtoupper(substr($product->form ?? 'GEN', 0, 3));
 
+        // Different weight variants of the same form (e.g. Capsule 45g vs
+        // Capsule 90g) share the same form code, so without this they'd
+        // generate identical-looking batch numbers ("SP-2026-CAP-01" for
+        // both) even though they're different products.
+        $weightPart = '';
+        if ($product->weight) {
+            $trimmed = rtrim(rtrim(number_format((float) $product->weight, 2, '.', ''), '0'), '.');
+            $weightPart = "-{$trimmed}G";
+        }
+
         $count = StockBatch::where('product_id', $product->id)
             ->whereYear('created_at', $year)
             ->count();
 
         $nextNumber = str_pad($count + 1, 2, '0', STR_PAD_LEFT);
-        $suggested = "SP-{$year}-{$code}-{$nextNumber}";
+        $suggested = "SP-{$year}-{$code}{$weightPart}-{$nextNumber}";
 
         return response()->json(['suggested_batch_no' => $suggested]);
     }
