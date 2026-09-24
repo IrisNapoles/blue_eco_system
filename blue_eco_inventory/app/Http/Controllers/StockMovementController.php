@@ -17,11 +17,19 @@ class StockMovementController extends Controller
         $this->cloudinary = $cloudinary;
     }
 
-    public function index()
+    // Paginated (default 20/page). Pass ?per_page= to change page size,
+    // or ?all=1 for every row unpaginated.
+    public function index(Request $request)
     {
-        return StockMovement::with(['stockBatch.product', 'destinationStockBatch'])
-            ->latest('moved_at')
-            ->get();
+        $query = StockMovement::with(['stockBatch.product', 'destinationStockBatch'])
+            ->latest('moved_at');
+
+        if ($request->boolean('all')) {
+            return $query->get();
+        }
+
+        $perPage = (int) $request->input('per_page', 20);
+        return $query->paginate($perPage);
     }
 
     // Literally moves stock between warehouses: the origin batch's

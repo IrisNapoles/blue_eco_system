@@ -9,16 +9,21 @@ use Illuminate\Support\Facades\DB;
 
 class StockBatchController extends Controller
 {
-    public function index()
+    // Paginated (default 20/page) so this stays fast as batches accumulate.
+    // Pass ?per_page= to change page size, or ?all=1 for every row
+    // unpaginated (e.g. barcode/lookup screens that need the full set).
+    public function index(Request $request)
     {
-        // FIFO order — soonest-to-expire first, then oldest-received first
-        // for batches with no expiry — matching StockService::deduct's
-        // consumption order, so the Stock Batches screen always shows
-        // staff which batch should be sold/moved out first.
-        return StockBatch::with('product')
-            ->orderByRaw('best_before IS NULL, best_before ASC')
-            ->orderBy('created_at')
-            ->get();
+        // Eager-load movements so StockBatch's quantity_out/quantity_available
+        // accessors don't fire one extra query per batch.
+        $query = StockBatch::with(['product', 'movements'])->latest();
+
+        if ($request->boolean('all')) {
+            return $query->get();
+        }
+
+        $perPage = (int) $request->input('per_page', 20);
+        return $query->paginate($perPage);
     }
 
     public function store(Request $request)
@@ -60,22 +65,12 @@ class StockBatchController extends Controller
         $year = now()->year;
         $code = $product->system_code ?: strtoupper(substr($product->form ?? 'GEN', 0, 3));
 
-        // Different weight variants of the same form (e.g. Capsule 45g vs
-        // Capsule 90g) share the same form code, so without this they'd
-        // generate identical-looking batch numbers ("SP-2026-CAP-01" for
-        // both) even though they're different products.
-        $weightPart = '';
-        if ($product->weight) {
-            $trimmed = rtrim(rtrim(number_format((float) $product->weight, 2, '.', ''), '0'), '.');
-            $weightPart = "-{$trimmed}G";
-        }
-
         $count = StockBatch::where('product_id', $product->id)
             ->whereYear('created_at', $year)
             ->count();
 
         $nextNumber = str_pad($count + 1, 2, '0', STR_PAD_LEFT);
-        $suggested = "SP-{$year}-{$code}{$weightPart}-{$nextNumber}";
+        $suggested = "SP-{$year}-{$code}-{$nextNumber}";
 
         return response()->json(['suggested_batch_no' => $suggested]);
     }

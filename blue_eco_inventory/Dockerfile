@@ -38,7 +38,12 @@ RUN chmod -R 755 storage bootstrap/cache
 # Render provides the port to bind to via the PORT env variable
 EXPOSE 8000
 
+# db:seed used to run here on every single boot/restart/deploy. It's
+# idempotent (firstOrCreate/updateOrCreate) so it never duplicated rows,
+# but it still added a handful of DB round trips to every cold start for
+# no benefit after the first run. Seed once manually instead:
+#   render exec -- php artisan db:seed --force
+# (or from the Render shell tab), then redeploy.
 CMD php artisan config:clear && \
     php artisan migrate --force && \
-    php artisan db:seed --force && \
     php artisan serve --host=0.0.0.0 --port=${PORT:-8000}

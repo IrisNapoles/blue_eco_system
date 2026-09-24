@@ -17,9 +17,16 @@ class SupplyController extends Controller
     }
 
     // Anyone logged in (admin, staff) can view supplies
-    public function index()
+    // Paginated (default 20/page). Pass ?per_page= to change page size,
+    // or ?all=1 for every row unpaginated (small/internal lookups only).
+    public function index(Request $request)
     {
-        return response()->json(Supply::orderBy('name')->get());
+        if ($request->boolean('all')) {
+            return response()->json(Supply::orderBy('name')->get());
+        }
+
+        $perPage = (int) $request->input('per_page', 20);
+        return response()->json(Supply::orderBy('name')->paginate($perPage));
     }
 
     public function show($id)

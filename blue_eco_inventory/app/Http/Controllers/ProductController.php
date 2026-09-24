@@ -18,9 +18,17 @@ class ProductController extends Controller
     }
 
     // Anyone logged in (admin, staff, distributor) can view products
-    public function index()
+    // Paginated (default 20/page) so this stays fast as the catalog grows.
+    // Pass ?per_page= to change page size, or ?all=1 to get every row
+    // unpaginated (only use ?all=1 for small/internal lookups, e.g. dropdowns).
+    public function index(Request $request)
     {
-        return response()->json(Product::orderBy('name')->get());
+        if ($request->boolean('all')) {
+            return response()->json(Product::orderBy('name')->get());
+        }
+
+        $perPage = (int) $request->input('per_page', 20);
+        return response()->json(Product::orderBy('name')->paginate($perPage));
     }
 
     public function show($id)

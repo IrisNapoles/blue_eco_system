@@ -24,12 +24,20 @@ class OrderController extends Controller
         $this->cloudinary = $cloudinary;
     }
 
+    // Paginated (default 20/page). Pass ?per_page= to change page size,
+    // or ?all=1 for every row unpaginated.
     public function index(Request $request)
     {
-        return Order::with('items.product')
+        $query = Order::with('items.product')
             ->where('distributor_id', $request->user()->id)
-            ->latest()
-            ->get();
+            ->latest();
+
+        if ($request->boolean('all')) {
+            return $query->get();
+        }
+
+        $perPage = (int) $request->input('per_page', 20);
+        return $query->paginate($perPage);
     }
 
     public function deliveryEstimate(Request $request, DeliveryEstimateService $estimator)
@@ -437,9 +445,18 @@ class OrderController extends Controller
     }
 
     // Admin view of ALL distributor orders
-    public function adminIndex()
+    // Paginated (default 20/page). Pass ?per_page= to change page size,
+    // or ?all=1 for every row unpaginated.
+    public function adminIndex(Request $request)
     {
-        return Order::with('items.product', 'distributor')->latest()->get();
+        $query = Order::with('items.product', 'distributor')->latest();
+
+        if ($request->boolean('all')) {
+            return $query->get();
+        }
+
+        $perPage = (int) $request->input('per_page', 20);
+        return $query->paginate($perPage);
     }
 
     // Admin moves an order through its lifecycle

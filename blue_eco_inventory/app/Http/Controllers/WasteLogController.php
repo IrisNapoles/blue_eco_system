@@ -18,9 +18,18 @@ class WasteLogController extends Controller
         $this->cloudinary = $cloudinary;
     }
 
+    // Paginated (default 20/page). Pass ?per_page= to change page size,
+    // or ?all=1 for every row unpaginated.
     public function index(Request $request)
     {
-        return WasteLog::with('product')->latest()->get();
+        $query = WasteLog::with('product')->latest();
+
+        if ($request->boolean('all')) {
+            return $query->get();
+        }
+
+        $perPage = (int) $request->input('per_page', 20);
+        return $query->paginate($perPage);
     }
 
     public function store(Request $request)

@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\StockBatch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Carbon\Carbon;
 
 class AnalyticsController extends Controller
@@ -304,39 +305,47 @@ class AnalyticsController extends Controller
 
     public function getDemandForecast(Request $request)
     {
-        $periods = $request->get('periods', 30);
-        
-        // Get historical order data (last 90 days) - Distributor orders only
-        $historicalData = Order::select(
-                DB::raw('DATE(created_at) as date'),
-                DB::raw('SUM(total_amount) as amount')
-            )
-            ->where('created_at', '>=', Carbon::now()->subDays(90))
-            ->where('status', '!=', 'cancelled')
-            ->groupBy('date')
-            ->orderBy('date')
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'date' => $item->date,
-                    'amount' => $item->amount
-                ];
+        $periods = (int) $request->get('periods', 30);
+
+        // Running the Python/Prophet subprocess is by far the slowest part
+        // of this endpoint (process spawn + pandas/Prophet startup on every
+        // call). The underlying historical order data only changes as new
+        // orders come in, so cache the finished forecast for a while instead
+        // of recomputing it on every request. Cache key includes $periods
+        // since different horizons produce different forecasts.
+        return response()->json(
+            Cache::remember("demand_forecast:{$periods}", now()->addMinutes(30), function () use ($periods) {
+                // Get historical order data (last 90 days) - Distributor orders only
+                $historicalData = Order::select(
+                        DB::raw('DATE(created_at) as date'),
+                        DB::raw('SUM(total_amount) as amount')
+                    )
+                    ->where('created_at', '>=', Carbon::now()->subDays(90))
+                    ->where('status', '!=', 'cancelled')
+                    ->groupBy('date')
+                    ->orderBy('date')
+                    ->get()
+                    ->map(function ($item) {
+                        return [
+                            'date' => $item->date,
+                            'amount' => $item->amount
+                        ];
+                    })
+                    ->toArray();
+
+                // If insufficient data, return empty forecast
+                if (count($historicalData) < 14) {
+                    return [
+                        'status' => 'insufficient_data',
+                        'message' => 'At least 14 days of historical order data required for forecasting',
+                        'forecast' => []
+                    ];
+                }
+
+                // Call Python script
+                return $this->callProphetScript($historicalData, $periods);
             })
-            ->toArray();
-
-        // If insufficient data, return empty forecast
-        if (count($historicalData) < 14) {
-            return response()->json([
-                'status' => 'insufficient_data',
-                'message' => 'At least 14 days of historical order data required for forecasting',
-                'forecast' => []
-            ]);
-        }
-
-        // Call Python script
-        $forecast = $this->callProphetScript($historicalData, $periods);
-
-        return response()->json($forecast);
+        );
     }
 
     private function callProphetScript($salesData, $periods)

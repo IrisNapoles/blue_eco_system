@@ -10,9 +10,18 @@ use Illuminate\Support\Facades\DB;
 
 class SaleController extends Controller
 {
-    public function index()
+    // Paginated (default 20/page). Pass ?per_page= to change page size,
+    // or ?all=1 for every row unpaginated.
+    public function index(Request $request)
     {
-        return Sale::with('items.product')->latest()->get();
+        $query = Sale::with('items.product')->latest();
+
+        if ($request->boolean('all')) {
+            return $query->get();
+        }
+
+        $perPage = (int) $request->input('per_page', 20);
+        return $query->paginate($perPage);
     }
 
     public function store(Request $request)

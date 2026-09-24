@@ -121,8 +121,10 @@ class ReportController extends Controller
         $salesQuery = Sale::query();
         // Rejected waste logs turned out not to be real waste, so they're
         // excluded — everything else ("Logged for Review" and "Confirmed")
-        // already reduced stock and represents a real loss.
-        $wasteQuery = WasteLog::with('product')->where('status', '!=', 'Rejected');
+        // already reduced stock and represents a real loss. No eager load
+        // here: this is reused below purely as a query builder for a SQL
+        // join+groupBy aggregate, not to hydrate WasteLog models.
+        $wasteQuery = WasteLog::query()->where('status', '!=', 'Rejected');
 
         if (!empty($from)) {
             $salesQuery->whereDate('created_at', '>=', $from);
@@ -135,27 +137,33 @@ class ReportController extends Controller
 
         $totalSales = (float) $salesQuery->sum('total_amount');
 
-        $wasteLogs = $wasteQuery->get();
-        $totalWasteUnits = (int) $wasteLogs->sum('quantity');
-        $totalWasteValue = (float) $wasteLogs->sum(
-            fn ($log) => $log->quantity * ((float) ($log->product->price ?? 0))
-        );
-
-        $wasteByProduct = $wasteLogs
-            ->groupBy('product_id')
-            ->map(function ($logs) {
-                $product = $logs->first()->product;
-                $units = $logs->sum('quantity');
-
-                return [
-                    'product_id' => $product?->id,
-                    'product_name' => $product?->name ?? 'Unknown product',
-                    'units_wasted' => $units,
-                    'value_wasted' => round($units * ((float) ($product->price ?? 0)), 2),
-                ];
-            })
-            ->sortByDesc('value_wasted')
+        // Aggregate waste totals and the per-product breakdown directly in
+        // SQL (join + groupBy) instead of pulling every waste_logs row (with
+        // its product relation) into PHP just to sum/group them there. This
+        // keeps the query fast as waste_logs grows, and matches the same
+        // join+groupBy pattern already used in topProducts() above.
+        $wasteByProductQuery = clone $wasteQuery;
+        $wasteByProduct = $wasteByProductQuery
+            ->join('products', 'waste_logs.product_id', '=', 'products.id')
+            ->select(
+                'products.id as product_id',
+                'products.name as product_name',
+                DB::raw('SUM(waste_logs.quantity) as units_wasted'),
+                DB::raw('SUM(waste_logs.quantity * products.price) as value_wasted')
+            )
+            ->groupBy('products.id', 'products.name')
+            ->orderByDesc('value_wasted')
+            ->get()
+            ->map(fn ($row) => [
+                'product_id' => $row->product_id,
+                'product_name' => $row->product_name,
+                'units_wasted' => (int) $row->units_wasted,
+                'value_wasted' => round((float) $row->value_wasted, 2),
+            ])
             ->values();
+
+        $totalWasteUnits = (int) $wasteByProduct->sum('units_wasted');
+        $totalWasteValue = (float) $wasteByProduct->sum('value_wasted');
 
         return [
             'from' => $from,
