@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { CreditCard, Truck, UserCog, ChevronRight } from 'lucide-react'
+import { CreditCard, Truck, UserCog, ChevronRight, Wallet } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { PageHeader } from '../components/ui'
 
@@ -22,6 +22,13 @@ const SETTINGS_ITEMS = [
     label: 'Shipping Rates',
     desc: 'Set delivery fees and estimated delivery days per zone.',
     icon: Truck,
+    roles: ['admin'],
+  },
+  {
+    to: '/business-settings',
+    label: 'Product Costs & Expenses',
+    desc: 'Set product costs (COGS), operating expenses, and tax rate used in Net Profit.',
+    icon: Wallet,
     roles: ['admin'],
   },
   {

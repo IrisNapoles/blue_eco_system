@@ -18,6 +18,7 @@ import Reports from './pages/Reports'
 import Statistics from './pages/Statistics'
 import Users from './pages/Users'
 import ShippingRates from './pages/ShippingRates'
+import BusinessSettings from './pages/BusinessSettings'
 import BarcodeStockout from './pages/BarcodeStockout'
 import Shop from './pages/Shop'
 import ProductDetail from './pages/ProductDetail'
@@ -81,6 +82,14 @@ export default function App() {
               element={
                 <ProtectedRoute roles={['admin']}>
                   <ShippingRates />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/business-settings"
+              element={
+                <ProtectedRoute roles={['admin']}>
+                  <BusinessSettings />
                 </ProtectedRoute>
               }
             />

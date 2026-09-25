@@ -16,6 +16,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SupplyController;
 use App\Http\Controllers\ForecastController;
 use App\Http\Controllers\ShippingRateController;
+use App\Http\Controllers\BusinessSettingsController;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
@@ -92,6 +93,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/reports/sales-vs-waste', [ReportController::class, 'salesVsWaste']);
         Route::get('/admin/reports/monthly-trend', [ReportController::class, 'monthlyTrend']);
         Route::get('/admin/reports/top-products', [ReportController::class, 'topProducts']);
+        Route::get('/admin/reports/net-profit', [ReportController::class, 'netProfit']);
+
+        // Admin manages product costs (COGS) and operating expenses/tax
+        // rate used in the Net Profit calculation above — see Settings.
+        Route::get('/admin/settings/product-costs', [BusinessSettingsController::class, 'productCosts']);
+        Route::post('/admin/settings/product-costs/bulk', [BusinessSettingsController::class, 'bulkUpdateProductCosts']);
+        Route::post('/admin/settings/product-costs/{product}', [BusinessSettingsController::class, 'updateProductCost']);
+        Route::get('/admin/settings/operating-expenses', [BusinessSettingsController::class, 'operatingExpenses']);
+        Route::post('/admin/settings/operating-expenses', [BusinessSettingsController::class, 'updateOperatingExpense']);
+        Route::post('/admin/settings/tax-rate', [BusinessSettingsController::class, 'updateTaxRate']);
 
         Route::get('/admin/reports/sales-forecast', [ForecastController::class, 'salesForecast']);
         Route::get('/admin/reports/product-forecast/{productId}', [ForecastController::class, 'productForecast']);

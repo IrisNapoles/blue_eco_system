@@ -124,15 +124,21 @@ class ReportController extends Controller
         // already reduced stock and represents a real loss. No eager load
         // here: this is reused below purely as a query builder for a SQL
         // join+groupBy aggregate, not to hydrate WasteLog models.
-        $wasteQuery = WasteLog::query()->where('status', '!=', 'Rejected');
+        //
+        // Columns are qualified with "waste_logs." because this query gets
+        // joined against products below — and products has its own
+        // created_at column too, so an unqualified whereDate('created_at')
+        // is ambiguous to Postgres once that join is added (this caused a
+        // 500 on every request until it was qualified here).
+        $wasteQuery = WasteLog::query()->where('waste_logs.status', '!=', 'Rejected');
 
         if (!empty($from)) {
             $salesQuery->whereDate('created_at', '>=', $from);
-            $wasteQuery->whereDate('created_at', '>=', $from);
+            $wasteQuery->whereDate('waste_logs.created_at', '>=', $from);
         }
         if (!empty($to)) {
             $salesQuery->whereDate('created_at', '<=', $to);
-            $wasteQuery->whereDate('created_at', '<=', $to);
+            $wasteQuery->whereDate('waste_logs.created_at', '<=', $to);
         }
 
         $totalSales = (float) $salesQuery->sum('total_amount');

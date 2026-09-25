@@ -11,6 +11,9 @@ import {
   Recycle,
   ShoppingBag,
   ClipboardList,
+  Trophy,
+  Truck,
+  Zap,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../lib/api'
@@ -23,6 +26,23 @@ const LOW_STOCK_THRESHOLD = 20
 function formatPeso(amount) {
   const n = Number(amount) || 0
   return `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+// Compact ₱ label for tight spaces (chart bars) — ₱1,234,567 becomes
+// ₱1.2M so it never forces a flex item wider than its column.
+function formatPesoCompact(amount) {
+  const n = Number(amount) || 0
+  if (n >= 1_000_000) return `₱${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `₱${(n / 1_000).toFixed(1)}K`
+  return `₱${n.toFixed(0)}`
+}
+
+// Same "Name 500g" convention Inventory.jsx uses — several products can
+// share a name but come in different weights (separate catalog rows/SKUs),
+// so the weight has to be shown or there's no way to tell them apart.
+function formatProductLabel(name, weight) {
+  const w = weight !== null && weight !== undefined && weight !== '' ? parseFloat(weight) : null
+  return w ? `${name} ${w}g` : name
 }
 
 function isSameMonth(dateString, reference) {
@@ -99,7 +119,7 @@ function TopBar({ firstName, subtitle, search, setSearch }) {
 function AdminDashboard({ user }) {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
-  const [analyticsTab, setAnalyticsTab] = useState('products') // 'products' | 'distributors' | 'movement'
+  const [perfTab, setPerfTab] = useState('products') // 'products' | 'distributors' | 'movers'
   const [products, setProducts] = useState([])
   const [allUsers, setAllUsers] = useState([])
   const [orders, setOrders] = useState([])
@@ -116,15 +136,20 @@ function AdminDashboard({ user }) {
     let cancelled = false
 
     async function load() {
+      // These four now paginate by default on the backend (20/page). The
+      // dashboard needs full-dataset counts (total products, low-stock
+      // count, today's sales/waste, etc.), not just one page of them, so
+      // pass all: 1 to get the complete unpaginated array back — same
+      // shape this code already expects.
       const results = await Promise.allSettled([
-        api.get('/products'),
+        api.get('/products', { params: { all: 1 } }),
         api.get('/admin/users'),
-        api.get('/admin/orders'),
+        api.get('/admin/orders', { params: { all: 1 } }),
         api.get('/admin/distributors/pending'),
         api.get('/admin/reports/monthly-trend', { params: { months: 12 } }),
         api.get('/admin/reports/sales-forecast', { params: { periods: 7 } }),
-        api.get('/staff/sales'),
-        api.get('/staff/waste-log'),
+        api.get('/staff/sales', { params: { all: 1 } }),
+        api.get('/staff/waste-log', { params: { all: 1 } }),
       ])
       if (cancelled) return
 
@@ -206,62 +231,61 @@ function AdminDashboard({ user }) {
 
   // Product order-share split, feeds the donut card — % of ordered units
   // that belong to each product, computed from real order items.
+  // Keyed by product id, not name: several products share a name but
+  // come in different weights (separate catalog rows), and grouping by
+  // name alone silently merged their quantities into one entry with no
+  // way to tell which variant was which.
   const productOrderCounts = {}
   orders.forEach((o) => {
     o.items?.forEach((it) => {
-      const name = it.product?.name || 'Unknown'
-      productOrderCounts[name] = (productOrderCounts[name] || 0) + Number(it.quantity || 0)
+      const product = it.product
+      const key = product?.id ?? `unknown:${product?.name || 'Unknown'}`
+      if (!productOrderCounts[key]) {
+        productOrderCounts[key] = { name: product?.name || 'Unknown', weight: product?.weight ?? null, qty: 0 }
+      }
+      productOrderCounts[key].qty += Number(it.quantity || 0)
     })
   })
-  const sortedProductOrders = Object.entries(productOrderCounts).sort((a, b) => b[1] - a[1])
-  const topProductColors = ['var(--color-accent-lime)', 'var(--color-accent-orange)', 'var(--color-accent-teal)', 'var(--color-brand-400)']
-  const top3 = sortedProductOrders.slice(0, 3)
-  const othersTotal = sortedProductOrders.slice(3).reduce((sum, [, qty]) => sum + qty, 0)
-  const totalOrderedUnits = sortedProductOrders.reduce((sum, [, qty]) => sum + qty, 0)
-  const productOrderBreakdown = [
-    ...top3.map(([name, qty], i) => ({ label: name, value: qty, color: topProductColors[i] })),
-    ...(othersTotal > 0 ? [{ label: 'Others', value: othersTotal, color: topProductColors[3] }] : []),
-  ]
+  const sortedProductOrders = Object.values(productOrderCounts).sort((a, b) => b.qty - a.qty)
 
-  // Distributor spend split, feeds the Top Distributors card — total order
-  // value (paid + pending, same convention as Total Sales) per distributor.
+  // Top 5 products by units ordered, for the compact ranked list at the
+  // bottom of the page (replaces the old donut chart).
+  const topProducts = sortedProductOrders.slice(0, 5).map((p) => ({
+    name: formatProductLabel(p.name, p.weight),
+    qty: p.qty,
+  }))
+  const maxProductQty = topProducts[0]?.qty || 1
+
+  // Top distributors by total order value — grouped from the same
+  // /admin/orders response already loaded above.
   const distributorTotals = {}
   orders.forEach((o) => {
     const name = o.distributor?.name || 'Unknown'
-    distributorTotals[name] = (distributorTotals[name] || 0) + Number(o.total_amount || 0)
+    if (!distributorTotals[name]) distributorTotals[name] = { name, total: 0, orderCount: 0 }
+    distributorTotals[name].total += Number(o.total_amount || 0)
+    distributorTotals[name].orderCount += 1
   })
-  const sortedDistributors = Object.entries(distributorTotals).sort((a, b) => b[1] - a[1])
-  const distTop3 = sortedDistributors.slice(0, 3)
-  const distOthersTotal = sortedDistributors.slice(3).reduce((sum, [, amt]) => sum + amt, 0)
-  const totalDistributorSpend = sortedDistributors.reduce((sum, [, amt]) => sum + amt, 0)
-  const distributorBreakdown = [
-    ...distTop3.map(([name, amt], i) => ({ label: name, value: amt, color: topProductColors[i] })),
-    ...(distOthersTotal > 0 ? [{ label: 'Others', value: distOthersTotal, color: topProductColors[3] }] : []),
-  ]
+  const topDistributors = Object.values(distributorTotals)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 4)
+  const maxDistributorTotal = topDistributors[0]?.total || 1
 
-  // Fast vs Slow Moving Products — ranks every product by units sold in the
-  // last 30 days. `salesToday` (despite its name) comes from /staff/sales,
-  // which returns full sale history, and already covers BOTH walk-in sales
-  // and shipped distributor orders (OrderController::updateStatus creates a
-  // matching Sale when an order ships), so this reflects real movement
-  // across both channels.
-  const MOVEMENT_WINDOW_DAYS = 30
-  const movementCutoff = new Date(now.getTime() - MOVEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
-  const unitsSoldByProduct = {}
-  salesToday.forEach((s) => {
-    if (new Date(s.created_at) < movementCutoff) return
-    s.items?.forEach((it) => {
-      const pid = it.product_id
-      unitsSoldByProduct[pid] = (unitsSoldByProduct[pid] || 0) + Number(it.quantity || 0)
-    })
-  })
-  const movementRanked = products.map((p) => ({
-    id: p.id,
-    name: p.name,
-    unitsSold: unitsSoldByProduct[p.id] || 0,
-  }))
-  const fastMoving = [...movementRanked].sort((a, b) => b.unitsSold - a.unitsSold).slice(0, 5)
-  const slowMoving = [...movementRanked].sort((a, b) => a.unitsSold - b.unitsSold).slice(0, 5)
+  // Fast vs. slow movers — ranked by the same units-ordered figures used
+  // for "Top Products". Each row in `products` is already a distinct
+  // catalog entry (its own id), including different-weight variants of
+  // the same name, so no separate dedupe step is needed here — matching
+  // on product id (via productOrderCounts, keyed the same way above)
+  // keeps every variant its own row instead of collapsing them together.
+  const productsByQty = products
+    .map((p) => ({
+      key: p.id,
+      name: formatProductLabel(p.name, p.weight),
+      qty: productOrderCounts[p.id]?.qty || 0,
+    }))
+    .sort((a, b) => b.qty - a.qty)
+  const splitPoint = Math.ceil(productsByQty.length / 2)
+  const fastMovers = productsByQty.slice(0, Math.min(4, splitPoint))
+  const slowMovers = productsByQty.slice(splitPoint).slice(-4).reverse()
 
   return (
     <div className="font-['Plus_Jakarta_Sans']">
@@ -459,81 +483,159 @@ function AdminDashboard({ user }) {
         </div>
       </div>
 
-      <div className="mt-4">
-        <div className="rounded-[1.75rem] bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-bold text-ink">Analytics</h2>
-            <div className="flex gap-1 rounded-full bg-brand-100 p-1">
-              {[
-                { key: 'products', label: 'Top Products' },
-                { key: 'distributors', label: 'Top Distributors' },
-                { key: 'movement', label: 'Fast vs Slow Moving' },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setAnalyticsTab(tab.key)}
-                  className={`rounded-full px-3 py-1.5 text-[11px] font-bold transition ${
-                    analyticsTab === tab.key ? 'bg-white text-ink shadow-sm' : 'text-ink/50 hover:text-ink'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+      <div className="mt-4 rounded-[1.75rem] bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-ink">Performance Overview</h2>
+            <p className="text-[11px] text-ink/40">Products, distributors, and stock movement — all time</p>
           </div>
+          <div className="flex gap-1.5 rounded-full bg-ink/5 p-1">
+            {[
+              { key: 'products', label: 'Top Products' },
+              { key: 'distributors', label: 'Top Distributors' },
+              { key: 'movers', label: 'Fast vs. Slow' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setPerfTab(tab.key)}
+                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                  perfTab === tab.key ? 'bg-white text-ink shadow-sm' : 'text-ink/40 hover:text-ink'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          {analyticsTab === 'products' && (
-            <div>
-              <TopProductsBar
-                breakdown={productOrderBreakdown}
-                total={totalOrderedUnits}
-                loading={loading}
-                centerLabel="Units Ordered"
-              />
-              <p className="mt-4 text-center text-xs text-ink/40">
-                Share of ordered units per product, all time.
-              </p>
-            </div>
+        <div className="mt-5">
+          {perfTab === 'products' && (
+            <RankedListSection
+              icon={Trophy}
+              title="Top Products"
+              loading={loading}
+              emptyText="No orders yet."
+              items={topProducts.map((p) => ({
+                key: p.name,
+                label: p.name,
+                value: `${p.qty} units`,
+                fraction: p.qty / maxProductQty,
+              }))}
+            />
           )}
 
-          {analyticsTab === 'distributors' && (
-            <div>
-              <TopProductsBar
-                breakdown={distributorBreakdown}
-                total={totalDistributorSpend}
-                loading={loading}
-                centerLabel="Total Order Value"
-                formatValue={formatPeso}
-              />
-              <p className="mt-4 text-center text-xs text-ink/40">
-                Share of total order value per distributor, all time.
-              </p>
-            </div>
+          {perfTab === 'distributors' && (
+            <RankedListSection
+              icon={Truck}
+              title="Top Distributors"
+              tone="alert"
+              loading={loading}
+              emptyText="No orders yet."
+              items={topDistributors.map((d) => ({
+                key: d.name,
+                label: d.name,
+                value: formatPesoCompact(d.total),
+                fraction: d.total / maxDistributorTotal,
+              }))}
+            />
           )}
 
-          {analyticsTab === 'movement' && (
+          {perfTab === 'movers' && (
             <div>
-              <p className="mt-4 text-xs text-ink/40">Units sold, last {MOVEMENT_WINDOW_DAYS} days</p>
-              <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
-                <MovementList
-                  title="🔥 Fast Moving"
-                  items={fastMoving}
-                  loading={loading}
-                  barColor="var(--color-accent-lime)"
-                  emptyLabel="No sales in this period yet."
-                />
-                <MovementList
-                  title="🐌 Slow Moving"
-                  items={slowMoving}
-                  loading={loading}
-                  barColor="var(--color-accent-orange)"
-                  emptyLabel="No products yet."
-                />
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-600">
+                  <Zap className="h-3.5 w-3.5" />
+                </span>
+                <h3 className="text-xs font-bold text-ink">Fast vs. Slow Movers</h3>
               </div>
+
+              {loading ? (
+                <p className="mt-3 text-sm text-ink/40">Loading...</p>
+              ) : fastMovers.length === 0 && slowMovers.length === 0 ? (
+                <p className="mt-3 text-sm text-ink/40">No products yet.</p>
+              ) : (
+                <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-brand-500">Fast movers</p>
+                    <div className="mt-3 space-y-2">
+                      {fastMovers.map((p) => (
+                        <div key={p.key} className="flex items-center justify-between rounded-xl bg-brand-100 px-3 py-2">
+                          <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
+                          <p className="shrink-0 text-xs text-ink/50">{p.qty} units</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-danger-500">Slow movers</p>
+                    <div className="mt-3 space-y-2">
+                      {slowMovers.map((p) => (
+                        <div key={p.key} className="flex items-center justify-between rounded-xl bg-danger-50 px-3 py-2">
+                          <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
+                          <p className="shrink-0 text-xs text-ink/50">{p.qty} units</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/* One column of the "Performance Overview" card — an icon+title header
+   followed by a compact ranked list (name, value, thin proportional
+   bar). Only one of these (or the Fast/Slow view) is shown at a time,
+   picked via the tab switcher above, so the section shows one clear
+   chart instead of three competing for space at once. */
+function RankedListSection({ icon: Icon, title, items, loading, emptyText, tone = 'brand', showRank = true, className = '' }) {
+  const toneClasses = {
+    brand: { iconBg: 'bg-brand-100', iconText: 'text-brand-600', bar: 'bg-brand-400' },
+    alert: { iconBg: 'bg-alert-50', iconText: 'text-alert-700', bar: 'bg-alert-500' },
+  }[tone]
+
+  return (
+    <div className={`pt-4 first:pt-0 lg:pt-0 ${className}`}>
+      <div className="flex items-center gap-2">
+        {Icon && (
+          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${toneClasses.iconBg} ${toneClasses.iconText}`}>
+            <Icon className="h-3.5 w-3.5" />
+          </span>
+        )}
+        <h3 className="text-xs font-bold text-ink">{title}</h3>
+      </div>
+
+      <div className="mt-3 space-y-3">
+        {loading && <p className="text-xs text-ink/40">Loading...</p>}
+        {!loading && items.length === 0 && <p className="text-xs text-ink/40">{emptyText}</p>}
+        {!loading &&
+          items.map((item, i) => (
+            <div key={item.key}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-ink">
+                  {showRank && <span className="shrink-0 text-ink/30">{i + 1}.</span>}
+                  {item.badge && (
+                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${item.badge.className}`}>
+                      {item.badge.text}
+                    </span>
+                  )}
+                  <span className="truncate">{item.label}</span>
+                </span>
+                <span className="shrink-0 text-[11px] font-bold text-ink/60">{item.value}</span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-ink/5">
+                <div
+                  className={`h-full rounded-full ${item.barColorClass || toneClasses.bar}`}
+                  style={{ width: `${Math.max(4, Math.round((item.fraction || 0) * 100))}%` }}
+                />
+              </div>
+            </div>
+          ))}
       </div>
     </div>
   )
@@ -862,168 +964,6 @@ function StatCard({ label, value, sub, dark, trendIcon, changePct, changeInverte
       </div>
     </div>
   )
-}
-
-function MovementList({ title, items, loading, barColor, emptyLabel }) {
-  const max = items.reduce((m, it) => Math.max(m, it.unitsSold), 0) || 1
-
-  return (
-    <div>
-      <h3 className="text-xs font-bold text-ink">{title}</h3>
-      <div className="mt-3 space-y-2.5">
-        {loading &&
-          [0, 1, 2].map((i) => (
-            <div key={i} className="h-2 w-full animate-pulse rounded-full bg-brand-100" style={{ backgroundColor: 'var(--color-brand-100)' }} />
-          ))}
-        {!loading && items.length === 0 && <p className="text-xs text-ink/40">{emptyLabel}</p>}
-        {!loading &&
-          items.map((it, i) => {
-            const widthPct = Math.max((it.unitsSold / max) * 100, 2)
-            return (
-              <div key={it.id}>
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="truncate text-ink/70">
-                    <span className="mr-1.5 font-bold text-ink/30">{i + 1}.</span>
-                    {it.name}
-                  </span>
-                  <span className="ml-2 shrink-0 font-bold text-ink">{it.unitsSold.toLocaleString()} units</span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: 'var(--color-brand-100)' }}>
-                  <div className="h-full rounded-full" style={{ width: `${widthPct}%`, backgroundColor: barColor }} />
-                </div>
-              </div>
-            )
-          })}
-      </div>
-    </div>
-  )
-}
-function TopProductsBar({ breakdown, total, loading, centerLabel = 'Units Ordered', formatValue = (v) => v.toLocaleString() }) {
-  const max = breakdown.reduce((m, b) => Math.max(m, b.value), 0) || 1
-
-  return (
-    <div className="mt-4">
-      <p className="text-center text-[10px] text-ink/40">
-        {centerLabel} · <span className="font-extrabold text-ink text-xs">{loading ? '—' : formatValue(total)}</span>
-      </p>
-      <div className="mt-4 space-y-3">
-        {!loading &&
-          breakdown.map((b) => {
-            const pct = Math.round((b.value / sum) * 100)
-            const widthPct = Math.max((b.value / max) * 100, 2) // keep a sliver visible for tiny values
-            return (
-              <div key={b.label}>
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span className="font-medium text-ink/70">{b.label}</span>
-                  <span className="font-bold text-ink">{formatValue(b.value)} <span className="font-normal text-ink/40">({pct}%)</span></span>
-                </div>
-                <div className="h-2.5 w-full overflow-hidden rounded-full bg-brand-100" style={{ backgroundColor: 'var(--color-brand-100)' }}>
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{ width: `${widthPct}%`, backgroundColor: b.color }}
-                  />
-                </div>
-              </div>
-            )
-          })}
-        {!loading && breakdown.length === 0 && (
-          <p className="text-center text-xs text-ink/40">No data yet.</p>
-        )}
-        {loading && (
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="h-2.5 w-full animate-pulse rounded-full bg-brand-100" style={{ backgroundColor: 'var(--color-brand-100)' }} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function StockDonut({ breakdown, total, loading, centerLabel = 'Total Products' }) {
-  const size = 160
-  const radius = 60
-  const strokeWidth = 16
-  const circumference = 2 * Math.PI * radius
-  const sum = breakdown.reduce((s, b) => s + b.value, 0) || 1
-
-  let offsetAccum = 0
-  const segments = breakdown.map((b) => {
-    const fraction = b.value / sum
-    const dash = fraction * circumference
-    const segment = {
-      ...b,
-      pct: Math.round(fraction * 100),
-      dasharray: `${dash} ${circumference - dash}`,
-      dashoffset: -offsetAccum,
-    }
-    offsetAccum += dash
-    return segment
-  })
-
-  return (
-    <div className="relative mx-auto mt-4" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="var(--color-brand-100)"
-          strokeWidth={strokeWidth}
-        />
-        {!loading &&
-          sum > 0 &&
-          segments.map((s) => (
-            <circle
-              key={s.label}
-              cx={size / 2}
-              cy={size / 2}
-              r={radius}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={strokeWidth}
-              strokeDasharray={s.dasharray}
-              strokeDashoffset={s.dashoffset}
-              strokeLinecap="round"
-              transform={`rotate(-90 ${size / 2} ${size / 2})`}
-            />
-          ))}
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <p className="text-[10px] text-ink/40">{centerLabel}</p>
-        <p className="text-xl font-extrabold text-ink">{loading ? '—' : total}</p>
-      </div>
-      {!loading &&
-        segments.map((s, i) => {
-          // Rough label placement around the ring, purely decorative.
-          const angle = (offsetAccumForLabel(segments, i) / circumference) * 2 * Math.PI - Math.PI / 2
-          const lx = size / 2 + (radius + 20) * Math.cos(angle)
-          const ly = size / 2 + (radius + 20) * Math.sin(angle)
-          if (s.value === 0) return null
-          return (
-            <span
-              key={s.label}
-              className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-white px-1.5 py-0.5 text-[9px] font-bold text-ink shadow"
-              style={{ left: lx, top: ly }}
-            >
-              {s.pct}%
-            </span>
-          )
-        })}
-    </div>
-  )
-}
-
-function offsetAccumForLabel(segments, index) {
-  let acc = 0
-  for (let i = 0; i < index; i++) {
-    const [dash] = segments[i].dasharray.split(' ')
-    acc += Number(dash)
-  }
-  const [ownDash] = segments[index].dasharray.split(' ')
-  return acc + Number(ownDash) / 2
 }
 
 function MiniBars() {

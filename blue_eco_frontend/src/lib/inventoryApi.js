@@ -1,7 +1,10 @@
 import api from './api'
 
 // --- Products ---
-export const getProducts = () => api.get('/products').then((r) => r.data)
+// /products now paginates by default on the backend (20/page). all: 1
+// asks it to return the plain, unpaginated array instead — same shape
+// every caller of getProducts() already expects.
+export const getProducts = () => api.get('/products', { params: { all: 1 } }).then((r) => r.data)
 export const getProduct = (id) => api.get(`/products/${id}`).then((r) => r.data)
 export const createProduct = (formData) =>
   api.post('/products', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
@@ -16,7 +19,9 @@ export const updateProduct = (id, formData) => {
 export const deleteProduct = (id) => api.delete(`/products/${id}`)
 
 // --- Stock Batches ---
-export const getStockBatches = () => api.get('/admin/stock-batches').then((r) => r.data)
+// Also paginated by default now on the backend — same all: 1 fix as above.
+export const getStockBatches = () =>
+  api.get('/admin/stock-batches', { params: { all: 1 } }).then((r) => r.data)
 export const createStockBatch = (payload) => api.post('/admin/stock-batches', payload)
 export const getNextBatchNumber = (productId) =>
   api
@@ -25,7 +30,9 @@ export const getNextBatchNumber = (productId) =>
 export const markBatchPrinted = (id, payload) => api.patch(`/admin/stock-batches/${id}/mark-printed`, payload)
 
 // --- Stock Movements (bazaar/event log) ---
-export const getStockMovements = () => api.get('/admin/stock-movements').then((r) => r.data)
+// Also paginated by default now on the backend — same all: 1 fix as above.
+export const getStockMovements = () =>
+  api.get('/admin/stock-movements', { params: { all: 1 } }).then((r) => r.data)
 // FormData now (so an optional photo of the transferred stock can be attached).
 export const createStockMovement = (payload) =>
   api.post('/admin/stock-movements', payload, {
@@ -36,7 +43,8 @@ export const markMovementReturned = (id, payload) =>
 export const deleteStockMovement = (id) => api.delete(`/admin/stock-movements/${id}`)
 
 // --- Supplies ---
-export const getSupplies = () => api.get('/supplies').then((r) => r.data)
+// Also paginated by default now on the backend — same all: 1 fix as above.
+export const getSupplies = () => api.get('/supplies', { params: { all: 1 } }).then((r) => r.data)
 export const createSupply = (formData) =>
   api.post('/supplies', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
 export const updateSupply = (id, formData) => {
